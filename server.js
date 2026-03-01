@@ -440,10 +440,11 @@ function getTimePeriodIndex(time) {
   return 0;
 }
 
-// Parse how many minutes the World LLM says this scene took (defaults to 20 if missing)
-function parseTimeSpent(memory) {
+// Parse how many minutes the World LLM says this scene took
+// defaultMinutes is used only when the field is absent (not as a floor on explicit values)
+function parseTimeSpent(memory, defaultMinutes = 20) {
   const match = memory.match(/\*\*Time Spent:\*\*\s*([\d.]+)\s*(minutes?|hours?)/i);
-  if (!match) return 20;
+  if (!match) return defaultMinutes;
   const amount = parseFloat(match[1]);
   return match[2].toLowerCase().startsWith('hour') ? Math.round(amount * 60) : Math.round(amount);
 }
@@ -488,6 +489,15 @@ function advanceWorldTime(memory, minutesSpent) {
     newSection = newSection.replace(
       /(\*\*Time of Day:\*\*\s*[^\n]+)/i,
       `$1\n**Minutes Elapsed:** ${newMinutesElapsed}`
+    );
+  }
+
+  // Auto-increment Fantasy Date day number when calendar day(s) roll over
+  const dayDiff = newDay - currentDay;
+  if (dayDiff > 0) {
+    newSection = newSection.replace(
+      /(\*\*Fantasy Date:\*\*\s*)(\d+)/i,
+      (_, prefix, dayNum) => `${prefix}${parseInt(dayNum) + dayDiff}`
     );
   }
 
@@ -1022,12 +1032,12 @@ CRITICAL RULES FOR TIME TRACKING:
 - In the WORLD_TIME section, write ONE new field — how long this scene took:
   **Time Spent:** [X minutes]
 - Use narrative judgment to estimate: quick chat ~10min, shopping ~20min, combat ~30min, meal/long conversation ~1hr, travel varies
-- Do NOT change Day Count, Time of Day, Minutes Elapsed, or Last Updated — the server manages these
-- You MAY update Fantasy Date if a new calendar day begins (increment the day number only)
+- Do NOT change Day Count, Time of Day, Minutes Elapsed, Last Updated, or Fantasy Date — the server manages all of these
 - You MAY update Season if the season changes
+- For sleep/rest, write the actual duration (e.g. "2 hours" for a nap, "8 hours" for a full night) — the server advances time accordingly
 - WORLD_TIME format (copy existing fields exactly, only add Time Spent):
   ## 🕐 WORLD_TIME
-  **Fantasy Date:** [copy EXACTLY — only increment day number on new calendar day]
+  **Fantasy Date:** [copy EXACTLY — do not change, server auto-increments on day rollover]
   **Day Count:** [copy EXACTLY — do not change]
   **Time of Day:** [copy EXACTLY — do not change]
   **Minutes Elapsed:** [copy EXACTLY — do not change]
@@ -1168,9 +1178,9 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
     }
 
     // SERVER-SIDE TIME TRACKING: parse Time Spent from World LLM and advance WORLD_TIME
-    let minutesSpent = parseTimeSpent(updatedMemory);
-    // When sleep occurs, ensure at least 6 hours pass (LLM might write a small value or forget)
-    if (sleepOccurred) minutesSpent = Math.max(minutesSpent, 360);
+    // If field is missing during sleep, default to 6h so the clock doesn't stall —
+    // but if the LLM explicitly wrote a value (e.g. "2 hours" for a nap), respect it exactly.
+    const minutesSpent = parseTimeSpent(updatedMemory, sleepOccurred ? 360 : 20);
     const { memory: timeMemory, newTime, newDay } = advanceWorldTime(updatedMemory, minutesSpent);
     updatedMemory = timeMemory;
     console.log(`Time tracking: +${minutesSpent}min → ${newTime} (Day ${newDay}), sleep: ${sleepOccurred}`);
