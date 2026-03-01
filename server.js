@@ -430,6 +430,7 @@ const BED_QUALITY = {
 // ============================================
 
 const TIME_PERIODS = ['Morning', 'Midday', 'Afternoon', 'Evening', 'Night'];
+const PERIOD_MINUTES = 240; // 4 hours per time period
 
 function getTimePeriodIndex(time) {
   const t = (time || '').trim().toLowerCase();
@@ -439,13 +440,62 @@ function getTimePeriodIndex(time) {
   return 0;
 }
 
-// Returns hours elapsed between two time-of-day / day combinations
-function computeHoursElapsed(oldTime, newTime, oldDay, newDay) {
-  const oldIdx = getTimePeriodIndex(oldTime);
-  const newIdx = getTimePeriodIndex(newTime);
-  const dayDiff = (newDay || 1) - (oldDay || 1);
-  const periodDiff = dayDiff * TIME_PERIODS.length + (newIdx - oldIdx);
-  return Math.max(0, periodDiff) * 4;
+// Parse how many minutes the World LLM says this scene took (defaults to 20 if missing)
+function parseTimeSpent(memory) {
+  const match = memory.match(/\*\*Time Spent:\*\*\s*([\d.]+)\s*(minutes?|hours?)/i);
+  if (!match) return 20;
+  const amount = parseFloat(match[1]);
+  return match[2].toLowerCase().startsWith('hour') ? Math.round(amount * 60) : Math.round(amount);
+}
+
+// Parse the accumulated minutes within the current time period
+function parseMinutesElapsed(memory) {
+  const match = memory.match(/\*\*Minutes Elapsed:\*\*\s*(\d+)/i);
+  return match ? parseInt(match[1]) : 0;
+}
+
+// Advance WORLD_TIME based on minutesSpent; returns updated memory + new time/day
+function advanceWorldTime(memory, minutesSpent) {
+  const currentTime = parseCurrentTime(memory);
+  const currentDay = parseCurrentDay(memory);
+  const minutesElapsed = parseMinutesElapsed(memory);
+
+  const totalMinutes = minutesElapsed + minutesSpent;
+  const periodAdvances = Math.floor(totalMinutes / PERIOD_MINUTES);
+  const newMinutesElapsed = totalMinutes % PERIOD_MINUTES;
+
+  let newPeriodIdx = getTimePeriodIndex(currentTime) + periodAdvances;
+  let newDay = currentDay;
+  while (newPeriodIdx >= TIME_PERIODS.length) {
+    newPeriodIdx -= TIME_PERIODS.length;
+    newDay++;
+  }
+  const newTime = TIME_PERIODS[newPeriodIdx];
+
+  const worldTimeMatch = memory.match(/## 🕐 WORLD_TIME[\s\S]*?(?=\n##|$)/);
+  if (!worldTimeMatch) return { memory, newTime, newDay };
+
+  let newSection = worldTimeMatch[0]
+    .replace(/\n?\*\*Time Spent:\*\*\s*[^\n]+/gi, '')       // remove ephemeral field
+    .replace(/\*\*Day Count:\*\*\s*\d+/i, `**Day Count:** ${newDay}`)
+    .replace(/\*\*Time of Day:\*\*\s*[^\n]+/i, `**Time of Day:** ${newTime}`)
+    .replace(/\*\*Last Updated:\*\*\s*[^\n]+/i, `**Last Updated:** Day ${newDay}, ${newTime}`);
+
+  if (newSection.match(/\*\*Minutes Elapsed:\*\*/i)) {
+    newSection = newSection.replace(/\*\*Minutes Elapsed:\*\*\s*\d+/i, `**Minutes Elapsed:** ${newMinutesElapsed}`);
+  } else {
+    // Insert after Time of Day if field doesn't exist yet (backwards compat)
+    newSection = newSection.replace(
+      /(\*\*Time of Day:\*\*\s*[^\n]+)/i,
+      `$1\n**Minutes Elapsed:** ${newMinutesElapsed}`
+    );
+  }
+
+  return {
+    memory: memory.replace(/## 🕐 WORLD_TIME[\s\S]*?(?=\n##|$)/, newSection),
+    newTime,
+    newDay
+  };
 }
 
 // Programmatically update the EXHAUSTION section in memory
@@ -969,18 +1019,21 @@ DM'S RESPONSE: ${chatResponse}
 Your task: Update memory.md to reflect any changes that occurred.
 
 CRITICAL RULES FOR TIME TRACKING:
-- ALWAYS update WORLD_TIME section - track day count and time of day progression
-- Time flows naturally: Morning → Midday → Afternoon → Evening → Night → (next day) Morning
-- Increment day count ONLY when transitioning from Night to Morning
-- Look for time indicators in the DM's response: "hours pass", "night falls", "dawn breaks", etc.
-- If DM says "you rest" or "you sleep until morning", advance time appropriately
-- WORLD_TIME MUST use these EXACT field names (copy this format precisely):
+- In the WORLD_TIME section, write ONE new field — how long this scene took:
+  **Time Spent:** [X minutes]
+- Use narrative judgment to estimate: quick chat ~10min, shopping ~20min, combat ~30min, meal/long conversation ~1hr, travel varies
+- Do NOT change Day Count, Time of Day, Minutes Elapsed, or Last Updated — the server manages these
+- You MAY update Fantasy Date if a new calendar day begins (increment the day number only)
+- You MAY update Season if the season changes
+- WORLD_TIME format (copy existing fields exactly, only add Time Spent):
   ## 🕐 WORLD_TIME
-  **Fantasy Date:** [copy EXACTLY from existing memory — NEVER change or omit this]
-  **Day Count:** [integer only]
-  **Time of Day:** [Morning/Midday/Afternoon/Evening/Night]
+  **Fantasy Date:** [copy EXACTLY — only increment day number on new calendar day]
+  **Day Count:** [copy EXACTLY — do not change]
+  **Time of Day:** [copy EXACTLY — do not change]
+  **Minutes Elapsed:** [copy EXACTLY — do not change]
   **Season:** [current season]
-  **Last Updated:** Day X, TimeOfDay
+  **Time Spent:** [X minutes]
+  **Last Updated:** [copy EXACTLY — do not change]
 
 SLEEP HANDLING (when SLEEP_DATA comment present):
   - CLEAR the EVENT_POOL section (new day cycle)
@@ -1022,7 +1075,7 @@ CHARACTER_VOICE SECTION (when newVoice in SLEEP_DATA):
   **Values:**
   - [value]
 
-⚠️ DO NOT TOUCH THESE SECTIONS - COPY THEM EXACTLY ⚠️
+⚠️ DO NOT TOUCH THESE FIELDS - COPY THEM EXACTLY ⚠️
 COIN_PURSE & COIN_LEDGER:
 - COPY the ## 💰 COIN_PURSE section EXACTLY as it appears in the input - do not change ANY values
 - COPY the ## 💰 COIN_LEDGER section EXACTLY as it appears in the input - do not change ANY values
@@ -1030,8 +1083,11 @@ COIN_PURSE & COIN_LEDGER:
 
 EXHAUSTION:
 - COPY the ## 😴 EXHAUSTION section EXACTLY as it appears in the input - do not change ANY values
-- The server automatically calculates hours awake from time-of-day transitions
-- If you modify exhaustion values, the tracking breaks
+- The server automatically calculates hours awake from Time Spent — do not touch
+
+WORLD_TIME (these specific fields):
+- Day Count, Time of Day, Minutes Elapsed, Last Updated → copy EXACTLY, server overwrites them
+- Only write **Time Spent:** to communicate scene duration to the server
 
 
 CRITICAL RULES FOR GENERAL_FACTS (RUMORS & LORE):
@@ -1111,6 +1167,12 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
       }
     }
 
+    // SERVER-SIDE TIME TRACKING: parse Time Spent from World LLM and advance WORLD_TIME
+    const minutesSpent = parseTimeSpent(updatedMemory);
+    const { memory: timeMemory, newTime, newDay } = advanceWorldTime(updatedMemory, minutesSpent);
+    updatedMemory = timeMemory;
+    console.log(`Time tracking: +${minutesSpent}min → ${newTime} (Day ${newDay}), sleep: ${sleepOccurred}`);
+
     // SAFETY: Restore EXHAUSTION section (server will recompute it, LLM must not alter it)
     if (preserveExhaustion) {
       if (updatedMemory.includes('## 😴 EXHAUSTION')) {
@@ -1120,11 +1182,8 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
       }
     }
 
-    // SERVER-SIDE TIME TRACKING: compute hours elapsed and update EXHAUSTION programmatically
-    const newTime = parseCurrentTime(updatedMemory);
-    const newDay = parseCurrentDay(updatedMemory);
-    const hoursElapsed = computeHoursElapsed(oldTime, newTime, oldDay, newDay);
-    console.log(`Time tracking: ${oldTime}(day ${oldDay}) → ${newTime}(day ${newDay}), hours elapsed: ${hoursElapsed}, sleep: ${sleepOccurred}`);
+    // Apply time progression to EXHAUSTION using exact minutes (not coarse period diff)
+    const hoursElapsed = minutesSpent / 60;
     if (hoursElapsed > 0 || sleepOccurred) {
       updatedMemory = applyTimeProgressionToMemory(updatedMemory, hoursElapsed, sleepOccurred, bedQuality, newDay, newTime);
     }
