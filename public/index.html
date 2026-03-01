@@ -1379,6 +1379,33 @@
       updateBadge('presenceBadge', stats.presence);
     }
 
+    // Generate a recap of where the player left off and display it in chat
+    async function loadRecap() {
+      chatContainer.innerHTML = `
+        <div class="message dm">
+          <div class="sender">🎭 Dungeon Master</div>
+          <div class="content"><span class="loading">Recalling your adventure...</span></div>
+        </div>
+      `;
+
+      try {
+        const response = await fetch('/api/recap');
+        const data = await response.json();
+
+        if (data.recap) {
+          chatContainer.innerHTML = `
+            <div class="message dm">
+              <div class="sender">🎭 Dungeon Master</div>
+              <div class="content">${parseMarkdown(data.recap)}</div>
+            </div>
+          `;
+        }
+      } catch (error) {
+        // Leave the loading message — not critical
+        console.error('Recap failed:', error);
+      }
+    }
+
     // Check for existing character on load
     async function checkCharacter() {
       try {
@@ -1394,6 +1421,7 @@
           updatePointsDisplay();
         } else {
           updateStatsPanel(stats);
+          loadRecap();
         }
       } catch (error) {
         console.error('Failed to check character:', error);

@@ -1096,6 +1096,41 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
   }
 });
 
+// API: Generate a recap of where the player left off (called on page load)
+app.get('/api/recap', async (req, res) => {
+  try {
+    const memory = await readMemory();
+    const stats = parsePlayerStats(memory);
+
+    if (!stats.exists) {
+      return res.json({ recap: null });
+    }
+
+    const recapPrompt = `You are the Dungeon Master. The player has just reopened their adventure after a break.
+
+CURRENT WORLD STATE:
+${memory}
+
+Write a short, atmospheric recap (2-3 sentences) of where the player left off.
+- Reference their current location and time of day
+- Mention their condition if it's notable (injured, exhausted, etc.)
+- Paint a quick sensory picture of the immediate surroundings
+- Write in second person, present tense ("You find yourself...")
+- Be evocative, not mechanical — this should feel like re-entering a story
+- Do NOT end with a question or prompt for action`;
+
+    const recap = await callGLM(
+      [{ role: 'user', content: 'Recap where I left off.' }],
+      recapPrompt
+    );
+
+    res.json({ recap: recap.trim() });
+  } catch (error) {
+    console.error('Recap error:', error);
+    res.status(500).json({ error: 'Failed to generate recap' });
+  }
+});
+
 // API: Check if character exists
 app.get('/api/character', async (req, res) => {
   try {
