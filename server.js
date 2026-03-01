@@ -185,7 +185,7 @@ function parseCoinLedger(memory) {
     balance: { pp: 0, gp: 0, sp: 0, cp: 0 }
   };
 
-  const ledgerMatch = memory.match(/## 💰 COIN_LEDGER[\s\S]*?(?=---|\n## [^💰]|$)/);
+  const ledgerMatch = memory.match(/## 💰 COIN_LEDGER[\s\S]*?(?=\n##|$)/);
   if (ledgerMatch) {
     const section = ledgerMatch[0];
 
@@ -352,7 +352,7 @@ function applyTransactionsToMemory(memory, transactions, currentDay, currentTime
 
   // Replace or add ledger section
   if (memory.includes('## 💰 COIN_LEDGER')) {
-    memory = memory.replace(/## 💰 COIN_LEDGER[\s\S]*?(?=---|\n## [^💰]|$)/, ledgerSection + '\n\n');
+    memory = memory.replace(/## 💰 COIN_LEDGER[\s\S]*?(?=\n##|$)/, ledgerSection + '\n\n');
   } else {
     // Insert after COIN_PURSE section
     const coinPurseEnd = memory.indexOf('---', memory.indexOf('## 💰 COIN_PURSE'));
@@ -410,9 +410,74 @@ function updateCoinPurse(memory, balance, currentDay, currentTime) {
 
   // Replace COIN_PURSE section
   return memory.replace(
-    /## 💰 COIN_PURSE[\s\S]*?(?=---|\n## [^💰])/,
+    /## 💰 COIN_PURSE[\s\S]*?(?=\n##|$)/,
     newCoinPurse + '\n\n'
   );
+}
+
+// ============================================
+// INVENTORY TRACKING SYSTEM
+// ============================================
+
+// Extract INVENTORY_DIFF block from World LLM output and return parsed diff + cleaned text
+function extractInventoryDiff(worldResponse) {
+  const diffMatch = worldResponse.match(/<!--\s*INVENTORY_DIFF\s*([\s\S]*?)-->/);
+  if (!diffMatch) return { gained: [], lost: [], cleaned: worldResponse };
+
+  const gained = [];
+  const lost = [];
+  for (const line of diffMatch[1].split('\n')) {
+    const t = line.trim();
+    if (t.startsWith('GAINED:')) gained.push(t.slice(7).trim());
+    else if (t.startsWith('LOST:')) lost.push(t.slice(5).trim());
+  }
+
+  const cleaned = worldResponse.replace(/\n*<!--\s*INVENTORY_DIFF[\s\S]*?-->\s*/g, '').trim();
+  return { gained, lost, cleaned };
+}
+
+// Fuzzy-match an inventory line against a lost-item description
+function inventoryLineMatchesLost(line, lostDesc) {
+  const lineLower = line.toLowerCase();
+  const lostLower = lostDesc.toLowerCase();
+  if (lineLower.includes(lostLower)) return true;
+  // Word-overlap fallback: ≥60% of significant words (len > 3) must appear in the line
+  const lostWords = lostLower.split(/\W+/).filter(w => w.length > 3);
+  if (lostWords.length === 0) return false;
+  const matches = lostWords.filter(w => lineLower.includes(w));
+  return matches.length >= Math.ceil(lostWords.length * 0.6);
+}
+
+// Apply gained/lost diff to the INVENTORY section in memory
+function applyInventoryDiff(memory, gained, lost, currentDay, currentTime) {
+  if (gained.length === 0 && lost.length === 0) return memory;
+
+  const inventoryRegex = /## [^\n]*INVENTORY[\s\S]*?(?=\n##|$)/;
+  const inventoryMatch = memory.match(inventoryRegex);
+  if (!inventoryMatch) return memory;
+
+  let sectionLines = inventoryMatch[0].split('\n');
+
+  // Mark lost items with [REMOVED] and strikethrough
+  sectionLines = sectionLines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('-')) return line;
+    if (/\[REMOVED/i.test(trimmed)) return line; // already marked
+    for (const lostDesc of lost) {
+      if (inventoryLineMatchesLost(trimmed, lostDesc)) {
+        return `- [REMOVED Day ${currentDay} - ${currentTime}] ~~${trimmed.slice(2).trim()}~~`;
+      }
+    }
+    return line;
+  });
+
+  // Append gained items
+  for (const item of gained) {
+    const entry = item.startsWith('[') ? `- ${item}` : `- [Day ${currentDay} - ${currentTime}] ${item}`;
+    sectionLines.push(entry);
+  }
+
+  return memory.replace(inventoryRegex, sectionLines.join('\n'));
 }
 
 // Bed quality tiers and their effects
@@ -531,6 +596,7 @@ INSTRUCTIONS:
 - Write naturally, like a real person's diary - not a formal report
 - If this is the first entry, establish the character's voice
 - If exhausted, the entry might be shorter or more raw
+- CRITICAL TIMING: This entry is written at the END of the day, BEFORE going to sleep. The character is tired and winding down, about to rest. They have NOT yet slept. NEVER write from a post-sleep perspective — no "I woke up", no references to dreams, no "after a good night's rest". Write as someone sitting by candlelight, tired, about to close the book and sleep.
 
 Write ONLY the diary entry text. No headers, no "Dear Diary", just the entry itself.`;
 
@@ -806,23 +872,16 @@ ${memory}
 PLAYER CHARACTER: ${stats.name}
 STATS: MIGHT ${stats.might}, AGILITY ${stats.agility}, MIND ${stats.mind}, PRESENCE ${stats.presence}
 
-DICE ROLLS (use these for any checks - do NOT make up your own numbers):
+🎲 MANDATORY DICE ROLLS — these are pre-rolled and must be used:
 ${rollsText}${exhaustionNote}
 
-ROLL INTERPRETATION:
-- 1: Critical failure (something goes very wrong)
-- 2-6: Failure with consequences
-- 7-10: Partial success or failure with silver lining
-- 11-15: Success with minor complication
-- 16-19: Clean success
-- 20: Critical success (exceptional outcome, bonus effect)
-
-WHEN TO USE ROLLS:
-- Combat: AGILITY for attack accuracy, MIGHT for damage/force
-- Physical challenges: MIGHT for strength, AGILITY for finesse
-- Social encounters: PRESENCE for persuasion, intimidation, deception
-- Investigation/puzzles: MIND for knowledge, perception, reasoning
-- Only use rolls when outcome is uncertain. Trivial actions auto-succeed.
+ROLL RULES (non-negotiable):
+- For ANY uncertain action, identify the relevant stat and use that roll's effective result
+- NEVER invent your own outcome number — only these rolls exist for this turn
+- Effective result scale: 1=critical fail, 2-6=fail+consequence, 7-10=partial, 11-15=success, 16-19=clean success, 20=critical success
+- Weave the result into narrative naturally — never say "you rolled X"
+- Trivial actions (opening an unlocked door, walking normally) auto-succeed without a roll
+- Which stat to use: AGILITY=attack/dodge/stealth, MIGHT=force/endurance, MIND=perception/knowledge, PRESENCE=social
 
 CONVERSATION HISTORY (recent exchanges for context):
 ${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}
@@ -842,6 +901,8 @@ EXHAUSTION AWARENESS:
 - Exhausted players struggle with complex tasks, make mistakes
 - If player tries to sleep/rest, describe the experience appropriately
 - Bed quality affects rest: street = uncomfortable, noble = luxurious
+
+⚠️ FINAL ROLL CHECK: Before writing your response, confirm you used the pre-rolled dice results above for any skill checks. The player can see these rolls — if your narrative outcome doesn't match the roll, it breaks immersion.
 
 Keep responses concise (2-3 paragraphs max). Focus on sensory details and player agency.`;
 
@@ -913,7 +974,13 @@ CRITICAL RULES FOR TIME TRACKING:
 - Increment day count ONLY when transitioning from Night to Morning
 - Look for time indicators in the DM's response: "hours pass", "night falls", "dawn breaks", etc.
 - If DM says "you rest" or "you sleep until morning", advance time appropriately
-- If memory doesn't have WORLD_TIME section yet, create it at the top
+- WORLD_TIME MUST use these EXACT field names (copy this format precisely):
+  ## 🕐 WORLD_TIME
+  **Fantasy Date:** [copy EXACTLY from existing memory — NEVER change or omit this]
+  **Day Count:** [integer only]
+  **Time of Day:** [Morning/Midday/Afternoon/Evening/Night]
+  **Season:** [current season]
+  **Last Updated:** Day X, TimeOfDay
 
 EXHAUSTION SYSTEM - CRITICAL:
 - Track hours awake in ## 😴 EXHAUSTION section
@@ -986,6 +1053,18 @@ CHARACTER_VOICE SECTION (when newVoice in SLEEP_DATA):
 - If you modify coin values, the game breaks
 - Just preserve these sections byte-for-byte in your output
 
+⚠️ INVENTORY SECTION - DO NOT MODIFY DIRECTLY ⚠️
+- COPY the INVENTORY section EXACTLY as it appears in the input - do not add, remove, or edit any item lines
+- Instead, report inventory changes at the VERY END of your output using this exact format:
+  <!-- INVENTORY_DIFF
+  GAINED: [Day X - TimeOfDay] Item Name (brief description of how it was obtained)
+  LOST: item name or enough words to identify it
+  -->
+- Use GAINED for items the player just acquired (picked up, bought, received, crafted, found)
+- Use LOST for items used up, consumed, dropped, sold, given away, or destroyed
+- One entry per line; multiple GAINED/LOST lines are fine
+- If no inventory changes occurred this turn, omit the INVENTORY_DIFF block entirely
+
 CRITICAL RULES FOR GENERAL_FACTS (RUMORS & LORE):
 - NEVER include date/time information in GENERAL_FACTS section
 - When adding a new rumor/fact, ALWAYS prepend it with the current in-game date in format: "[Day X - TimeOfDay]"
@@ -1012,14 +1091,14 @@ OTHER RULES:
 - Add NEW entries at the top of each section with date/time stamps
 - For EVERY new entry, prepend with "[Day X - TimeOfDay]" to show when it happened
 - For COIN_PURSE: add transaction entries like "[Day 3 - Evening] Paid 2 coins for ale"
-- For INVENTORY: add entries like "[Day 2 - Morning] Found rusty sword"
 - For LOCATIONS: add entries like "[Day 1 - Afternoon] Discovered village"
 - For PEOPLE_MET: add entries like "[Day 4 - Noon] Met Elara the merchant"
 - For GENERAL_FACTS: add entries like "[Day 2 - Evening] Heard rumor about dragon in mountains"
 - For PLAYER_STATE: add condition changes like "[Day 2 - Night] Exhausted from travel"
 - REMOVE any <!-- SLEEP_DATA: ... --> comments from the output
+- The <!-- INVENTORY_DIFF ... --> block (if you write one) goes AFTER the memory content, not inside it
 
-Return ONLY the updated memory.md content. No explanations, no markdown code blocks - just the raw content.`;
+Return ONLY the updated memory.md content followed by any INVENTORY_DIFF block. No explanations, no markdown code blocks - just the raw content.`;
 
     const worldResponse = await callGLM(
       [{ role: 'user', content: `Process this action and update memory.` }],
@@ -1034,20 +1113,47 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
 
     // SAFETY: Preserve coin sections from the pre-processed memory (with our ledger updates)
     // The LLM sometimes zeros these out despite instructions
-    const preserveCoinPurse = memory.match(/## 💰 COIN_PURSE[\s\S]*?(?=---|\n## [^💰])/);
-    const preserveCoinLedger = memory.match(/## 💰 COIN_LEDGER[\s\S]*?(?=---|\n## [^💰])/);
+    const preserveCoinPurse = memory.match(/## 💰 COIN_PURSE[\s\S]*?(?=\n##|$)/);
+    const preserveCoinLedger = memory.match(/## 💰 COIN_LEDGER[\s\S]*?(?=\n##|$)/);
 
     if (preserveCoinPurse) {
-      updatedMemory = updatedMemory.replace(
-        /## 💰 COIN_PURSE[\s\S]*?(?=---|\n## [^💰])/,
-        preserveCoinPurse[0]
-      );
+      if (updatedMemory.includes('## 💰 COIN_PURSE')) {
+        updatedMemory = updatedMemory.replace(
+          /## 💰 COIN_PURSE[\s\S]*?(?=\n##|$)/,
+          preserveCoinPurse[0]
+        );
+      } else {
+        if (updatedMemory.includes('## 💰 COIN_LEDGER')) {
+          updatedMemory = updatedMemory.replace('## 💰 COIN_LEDGER', preserveCoinPurse[0] + '\n\n## 💰 COIN_LEDGER');
+        } else {
+          updatedMemory += '\n\n' + preserveCoinPurse[0];
+        }
+      }
     }
     if (preserveCoinLedger) {
-      updatedMemory = updatedMemory.replace(
-        /## 💰 COIN_LEDGER[\s\S]*?(?=---|\n## [^💰])/,
-        preserveCoinLedger[0]
-      );
+      if (updatedMemory.includes('## 💰 COIN_LEDGER')) {
+        updatedMemory = updatedMemory.replace(
+          /## 💰 COIN_LEDGER[\s\S]*?(?=\n##|$)/,
+          preserveCoinLedger[0]
+        );
+      } else {
+        updatedMemory += '\n\n' + preserveCoinLedger[0];
+      }
+    }
+
+    // INVENTORY TRACKING: Extract diff the World LLM reported, then enforce our own inventory state
+    const { gained: invGained, lost: invLost, cleaned: memoryWithoutDiff } = extractInventoryDiff(updatedMemory);
+    updatedMemory = memoryWithoutDiff;
+
+    // Apply the diff to the pre-World-LLM inventory (prevents LLM from silently adding/dropping items)
+    const inventoryApplied = applyInventoryDiff(memory, invGained, invLost, currentDay, currentTime);
+    const updatedInventoryMatch = inventoryApplied.match(/## [^\n]*INVENTORY[\s\S]*?(?=\n##|$)/);
+    if (updatedInventoryMatch) {
+      if (/## [^\n]*INVENTORY/.test(updatedMemory)) {
+        updatedMemory = updatedMemory.replace(/## [^\n]*INVENTORY[\s\S]*?(?=\n##|$)/, updatedInventoryMatch[0]);
+      } else {
+        updatedMemory += '\n\n' + updatedInventoryMatch[0];
+      }
     }
 
     // Write updated memory

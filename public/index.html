@@ -1539,21 +1539,35 @@
         const lines = section.trim().split('\n');
         const title = lines[0].trim();
 
-        // Check if section contains WORLD_TIME (handles emoji prefix)
-        if (title.includes('WORLD_TIME')) {
-          const content = section;
-          const dateMatch = content.match(/\*\*Fantasy Date:\*\*\s*([^\n]+)/i);
-          const dayMatch = content.match(/\*\*Day Count:\*\*\s*(\d+)/i);
-          const timeMatch = content.match(/\*\*Time of Day:\*\*\s*([^\n]+)/i);
+        // Check if section contains WORLD_TIME — use section content not just title
+        // (handles emoji prefix variations and # vs ## heading levels)
+        if (section.includes('WORLD_TIME')) {
+          const dateMatch = section.match(/\*\*Fantasy Date:\*\*\s*([^\n]+)/i);
+          const dayMatch = section.match(/\*\*(?:Day Count|Current Day):\*\*\s*(\d+)/i);
+          const timeMatch = section.match(/\*\*Time of Day:\*\*\s*([^\n]+)/i);
           if (dateMatch) worldTime.fantasyDate = dateMatch[1].trim();
           if (dayMatch) worldTime.day = parseInt(dayMatch[1]);
           if (timeMatch) worldTime.time = timeMatch[1].trim();
         }
 
-        // Check if section contains PLAYER_STATE (handles emoji prefix)
-        if (title.includes('PLAYER_STATE')) {
+        // Check if section contains PLAYER_STATE
+        if (section.includes('PLAYER_STATE')) {
           const conditionMatch = section.match(/\*\*Condition:\*\*\s*([^\n]+)/i);
           if (conditionMatch) playerCondition = conditionMatch[1].trim();
+        }
+
+        // Helper: parse a coin amount string like "1g, 14s, 8c" or "2 gold 5 silver"
+        function parseCoinString(str) {
+          const c = { pp: 0, gp: 0, sp: 0, cp: 0 };
+          const pp = str.match(/(\d+)\s*p(?:p|latinum)?(?:\b|,)/i);
+          const gp = str.match(/(\d+)\s*g(?:p|old)?(?:\b|,)/i);
+          const sp = str.match(/(\d+)\s*s(?:p|ilver)?(?:\b|,)/i);
+          const cp = str.match(/(\d+)\s*c(?:p|opper)?(?:\b|,)/i);
+          if (pp) c.pp = parseInt(pp[1]);
+          if (gp) c.gp = parseInt(gp[1]);
+          if (sp) c.sp = parseInt(sp[1]);
+          if (cp) c.cp = parseInt(cp[1]);
+          return c;
         }
 
         // Check if section contains COIN_LEDGER (preferred, accurate double-entry)
@@ -1568,18 +1582,25 @@
           if (spMatch) coins.sp = parseInt(spMatch[1]);
           if (cpMatch) coins.cp = parseInt(cpMatch[1]);
 
-          console.log('Parsed from COIN_LEDGER:', coins);
+          // Fallback: try Net or Income fields if Balance fields absent
+          if (!(ppMatch || gpMatch || spMatch || cpMatch)) {
+            const netMatch = section.match(/\*\*Net:\*\*\s*\+?([\d\w\s,]+)/i);
+            if (netMatch) {
+              const parsed = parseCoinString(netMatch[1]);
+              coins.pp = parsed.pp; coins.gp = parsed.gp;
+              coins.sp = parsed.sp; coins.cp = parsed.cp;
+            }
+          }
         }
 
         // Also check COIN_PURSE as backup
         if (title.includes('COIN_PURSE')) {
-          // Parse multi-currency format
+          // Standard format: **Platinum (pp): X**
           const ppMatch = section.match(/\*\*Platinum.*?:\*\*\s*(\d+)/i);
           const gpMatch = section.match(/\*\*Gold.*?:\*\*\s*(\d+)/i);
           const spMatch = section.match(/\*\*Silver.*?:\*\*\s*(\d+)/i);
           const cpMatch = section.match(/\*\*Copper.*?:\*\*\s*(\d+)/i);
 
-          // Only use COIN_PURSE values if ledger was empty/zero
           const purseCoins = {
             pp: ppMatch ? parseInt(ppMatch[1]) : 0,
             gp: gpMatch ? parseInt(gpMatch[1]) : 0,
@@ -1587,53 +1608,54 @@
             cp: cpMatch ? parseInt(cpMatch[1]) : 0
           };
 
+          // Fallback: try **Current Balance:** field
+          if (!(ppMatch || gpMatch || spMatch || cpMatch)) {
+            const balanceMatch = section.match(/\*\*Current Balance:\*\*\s*\+?([\d\w\s,]+)/i);
+            if (balanceMatch) {
+              const parsed = parseCoinString(balanceMatch[1]);
+              purseCoins.pp = parsed.pp; purseCoins.gp = parsed.gp;
+              purseCoins.sp = parsed.sp; purseCoins.cp = parsed.cp;
+            }
+          }
+
           // Use purse values if they're higher (ledger might be corrupted/zero)
           if (purseCoins.pp + purseCoins.gp + purseCoins.sp + purseCoins.cp >
               coins.pp + coins.gp + coins.sp + coins.cp) {
             coins = purseCoins;
-            console.log('Using COIN_PURSE instead:', coins);
           }
         }
 
         // Check if section contains INVENTORY (handles emoji prefix)
         if (title.includes('INVENTORY')) {
-          // Find where items start (after "**Items:**" line)
-          let inItems = false;
-          for (let i = 0; i < lines.length; i++) {
+          // Parse all bullet lines in the section — no **Items:** header required
+          for (let i = 1; i < lines.length; i++) { // skip title line
             const line = lines[i];
+            if (line.startsWith('---')) break;
+            // Skip metadata lines like **Last Updated:** or **Items:**
+            if (line.trim().startsWith('**')) continue;
+            if (line.trim() === '') continue;
+            // Skip removed items (tracked in history but not shown in active inventory)
+            if (/^\-\s*\[REMOVED/i.test(line.trim())) continue;
 
-            // Start parsing after we see the Items header
-            if (line.includes('**Items:**')) {
-              inItems = true;
+            // Match bracketed format: - [v#] or - [Day X - Time]
+            const bracketMatch = line.match(/^-\s*\[([^\]]+)\]\s+(.+)$/);
+            if (bracketMatch) {
+              const fullItemText = bracketMatch[2];
+              const nameDescMatch = fullItemText.match(/^([^(]+?)(?:\s*\(([^)]+)\))?(?:\s*-\s*(.+))?$/);
+              if (nameDescMatch) {
+                items.push({
+                  name: nameDescMatch[1].trim(),
+                  desc: (nameDescMatch[2] || '') + (nameDescMatch[3] ? ' - ' + nameDescMatch[3] : '')
+                });
+              } else {
+                items.push({ name: fullItemText.trim(), desc: '' });
+              }
               continue;
             }
 
-            // Stop at next section or empty line before items
-            if (!inItems) continue;
-            if (line.startsWith('---') || line.trim() === '') break;
-
-            // Match item patterns:
-            // - [v#] Item Name (description)
-            // - [Day X - Time] Item Name (description) - extra notes
-            const match = line.match(/^-\s*\[([^\]]+)\]\s+(.+)$/);
-            if (match) {
-              const fullItemText = match[2];
-              // Extract item name and optional description in parentheses
-              const nameDescMatch = fullItemText.match(/^([^(]+?)(?:\s*\(([^)]+)\))?(?:\s*-\s*(.+))?$/);
-              if (nameDescMatch) {
-                const itemName = nameDescMatch[1].trim();
-                const itemDesc = nameDescMatch[2] || '';
-                const extraNotes = nameDescMatch[3] || '';
-                items.push({
-                  name: itemName,
-                  desc: itemDesc + (extraNotes ? ' - ' + extraNotes : '')
-                });
-              } else {
-                items.push({
-                  name: fullItemText.trim(),
-                  desc: ''
-                });
-              }
+            // Fallback: plain bullet without brackets
+            if (line.match(/^-\s+\S/)) {
+              items.push({ name: line.replace(/^-\s+/, '').trim(), desc: '' });
             }
           }
         }
@@ -1675,8 +1697,10 @@
           // Update time display
           if (worldTime.fantasyDate) {
             fantasyDate.textContent = worldTime.fantasyDate;
+          } else if (worldTime.day > 0) {
+            fantasyDate.textContent = 'Day ' + worldTime.day;
           } else {
-            fantasyDate.textContent = 'Loading...';
+            fantasyDate.textContent = 'Day 1';
           }
           timeOfDay.textContent = worldTime.time;
 
