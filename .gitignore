@@ -1,0 +1,25 @@
+# Environment variables
+.env
+
+# Node modules
+node_modules/
+
+# Game state (user-specific)
+memory.md
+history.json
+
+# BMAD framework (large, not part of core game)
+_bmad/
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

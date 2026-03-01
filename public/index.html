@@ -1,0 +1,2034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generative RPG - Your Adventure Awaits</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #e8e8e8;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 15px;
+      overflow: hidden;
+    }
+
+    header {
+      text-align: center;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255, 215, 0, 0.3);
+      margin-bottom: 15px;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 1.8em;
+      background: linear-gradient(45deg, #ffd700, #ff8c00);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 30px rgba(255, 215, 0, 0.3);
+    }
+
+    header .subtitle {
+      color: #8899ac;
+      font-style: italic;
+      margin-top: 3px;
+      font-size: 0.9em;
+    }
+
+    .game-layout {
+      flex: 1;
+      display: flex;
+      gap: 20px;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .side-panel {
+      width: 280px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+      max-height: 100%;
+    }
+
+    .panel {
+      background: rgba(0, 0, 0, 0.4);
+      border: 2px solid rgba(255, 215, 0, 0.3);
+      border-radius: 10px;
+      padding: 10px 12px;
+      flex-shrink: 0;
+    }
+
+    .panel h3 {
+      color: #ffd700;
+      font-size: 1em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .coin-display {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 8px;
+      background: rgba(255, 215, 0, 0.1);
+      border-radius: 8px;
+    }
+
+    .coin-type {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.9em;
+      font-weight: bold;
+    }
+
+    .coin-type .amount {
+      min-width: 20px;
+    }
+
+    .coin-type.platinum { color: #e5e5e5; }
+    .coin-type.gold { color: #ffd700; }
+    .coin-type.silver { color: #c0c0c0; }
+    .coin-type.copper { color: #b87333; }
+
+    .time-display {
+      text-align: center;
+      padding: 5px;
+    }
+
+    .time-date {
+      font-size: 0.95em;
+      font-weight: bold;
+      color: #e8e8e8;
+      margin-bottom: 5px;
+    }
+
+    .time-details {
+      font-size: 0.8em;
+      color: #8899ac;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .inventory-panel {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 100px;
+    }
+
+    .inventory-list {
+      list-style: none;
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 5px;
+      scrollbar-width: thin;
+      scrollbar-color: #ffd700 rgba(0,0,0,0.3);
+    }
+
+    .inventory-list::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .inventory-list::-webkit-scrollbar-track {
+      background: rgba(0,0,0,0.3);
+      border-radius: 3px;
+    }
+
+    .inventory-list::-webkit-scrollbar-thumb {
+      background: #ffd700;
+      border-radius: 3px;
+    }
+
+    .inventory-item {
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      margin-bottom: 10px;
+      border-left: 3px solid #ffd700;
+    }
+
+    .inventory-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .inventory-item .item-name {
+      font-weight: bold;
+      color: #f0f0f0;
+      font-size: 1em;
+      line-height: 1.4;
+      margin-bottom: 3px;
+    }
+
+    .inventory-item .item-desc {
+      font-size: 0.85em;
+      color: #a0aec0;
+      line-height: 1.5;
+    }
+
+    .empty-inventory {
+      text-align: center;
+      color: #8899ac;
+      font-style: italic;
+      padding: 15px;
+      font-size: 0.9em;
+    }
+
+    .condition-display {
+      text-align: center;
+      padding: 5px;
+    }
+
+    .condition-status {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 0.95em;
+    }
+
+    .condition-status.healthy { background: rgba(72, 187, 120, 0.3); color: #68d391; }
+    .condition-status.tired { background: rgba(236, 201, 75, 0.3); color: #ecc94b; }
+    .condition-status.exhausted { background: rgba(237, 137, 54, 0.3); color: #ed8936; }
+    .condition-status.wounded { background: rgba(245, 101, 101, 0.3); color: #fc8181; }
+    .condition-status.critical { background: rgba(229, 62, 62, 0.3); color: #f56565; animation: pulse 1s infinite; }
+
+    .side-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .save-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #3182ce, #2c5282);
+      color: white;
+      border: none;
+      padding: 8px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-size: 0.85em;
+    }
+
+    .save-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 15px rgba(49, 130, 206, 0.4);
+    }
+
+    .reset-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #e53e3e, #c53030);
+      color: white;
+      border: none;
+      padding: 8px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-size: 0.85em;
+    }
+
+    .reset-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 15px rgba(229, 62, 62, 0.4);
+    }
+
+    .reset-btn:active {
+      transform: translateY(0);
+    }
+
+    .hidden-input {
+      display: none;
+    }
+
+    /* Character Creation */
+    .char-form {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .char-field label {
+      display: block;
+      color: #ffd700;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+
+    .char-field input {
+      width: 100%;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 215, 0, 0.3);
+      border-radius: 6px;
+      color: #e8e8e8;
+      font-size: 1em;
+    }
+
+    .char-field input:focus {
+      outline: none;
+      border-color: #ffd700;
+    }
+
+    .char-points {
+      text-align: center;
+      padding: 8px;
+      background: rgba(255, 215, 0, 0.1);
+      border-radius: 6px;
+      color: #ffd700;
+    }
+
+    .char-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      border-left: 3px solid #ffd700;
+    }
+
+    .stat-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .stat-name {
+      font-weight: bold;
+      color: #e8e8e8;
+    }
+
+    .stat-desc {
+      font-size: 0.75em;
+      color: #8899ac;
+    }
+
+    .stat-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stat-btn {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      font-size: 1.2em;
+      font-weight: bold;
+      background: rgba(255, 215, 0, 0.2);
+      border: 1px solid #ffd700;
+      border-radius: 4px;
+      color: #ffd700;
+      cursor: pointer;
+    }
+
+    .stat-btn:hover {
+      background: rgba(255, 215, 0, 0.4);
+    }
+
+    .stat-value {
+      font-size: 1.3em;
+      font-weight: bold;
+      color: #ffd700;
+      min-width: 20px;
+      text-align: center;
+    }
+
+    .stat-effect {
+      font-size: 0.75em;
+      padding: 3px 8px;
+      border-radius: 10px;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    .stat-effect.adv { background: rgba(72, 187, 120, 0.3); color: #68d391; }
+    .stat-effect.normal { background: rgba(160, 174, 192, 0.3); color: #a0aec0; }
+    .stat-effect.dis { background: rgba(245, 101, 101, 0.3); color: #fc8181; }
+
+    .char-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.8em;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 6px;
+    }
+
+    .legend-item { color: #8899ac; }
+    .legend-item.adv { color: #68d391; }
+    .legend-item.dis { color: #fc8181; }
+
+    .create-btn {
+      padding: 12px;
+      font-size: 1.1em;
+      font-weight: bold;
+      background: linear-gradient(135deg, #ffd700, #ff8c00);
+      color: #1a1a2e;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .create-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 20px rgba(255, 215, 0, 0.4);
+    }
+
+    .create-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Stats Display in Sidebar */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .stat-badge {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 6px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 6px;
+      font-size: 0.8em;
+    }
+
+    .stat-badge .stat-val {
+      font-size: 1.3em;
+      font-weight: bold;
+      color: #ffd700;
+    }
+
+    .stat-badge .stat-label {
+      font-size: 0.7em;
+      color: #8899ac;
+      text-transform: uppercase;
+    }
+
+    .stat-badge.adv { border-left: 2px solid #68d391; }
+    .stat-badge.dis { border-left: 2px solid #fc8181; }
+
+    /* Roll Display */
+    .roll-display {
+      margin-top: 10px;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 6px;
+      font-size: 0.85em;
+      border-left: 3px solid #ffd700;
+    }
+
+    .roll-display .roll-title {
+      color: #ffd700;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .roll-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      color: #a0aec0;
+    }
+
+    .roll-item .roll-result {
+      font-weight: bold;
+    }
+
+    .roll-item.adv .roll-result { color: #68d391; }
+    .roll-item.dis .roll-result { color: #fc8181; }
+    .roll-item.crit .roll-result { color: #ffd700; }
+    .roll-item.critfail .roll-result { color: #f56565; }
+
+    .chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+
+    .message {
+      margin-bottom: 20px;
+      padding: 15px;
+      border-radius: 10px;
+      animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.player {
+      background: linear-gradient(135deg, #4a5568, #2d3748);
+      margin-left: 50px;
+      border-left: 3px solid #ffd700;
+    }
+
+    .message.dm {
+      background: linear-gradient(135deg, #2c5282, #1a365d);
+      margin-right: 50px;
+      border-left: 3px solid #808080;
+    }
+
+    .message .sender {
+      font-weight: bold;
+      font-size: 0.9em;
+      margin-bottom: 8px;
+      color: #ffd700;
+    }
+
+    .message.player .sender {
+      color: #90cdf4;
+    }
+
+    .message .content {
+      line-height: 1.6;
+    }
+
+    .message .content strong {
+      color: #ffd700;
+      font-weight: bold;
+    }
+
+    .message .content em {
+      color: #90cdf4;
+      font-style: italic;
+    }
+
+    .message .content code {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 0.9em;
+    }
+
+    .input-container {
+      display: flex;
+      gap: 10px;
+      padding: 15px;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 10px;
+    }
+
+    #playerInput {
+      flex: 1;
+      padding: 15px;
+      font-size: 1em;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 215, 0, 0.3);
+      border-radius: 8px;
+      color: #e8e8e8;
+      font-family: inherit;
+    }
+
+    #playerInput:focus {
+      outline: none;
+      border-color: #ffd700;
+      box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+    }
+
+    #playerInput::placeholder {
+      color: #8899ac;
+    }
+
+    button {
+      padding: 15px 30px;
+      font-size: 1em;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-family: inherit;
+    }
+
+    #sendBtn {
+      background: linear-gradient(135deg, #ffd700, #ff8c00);
+      color: #1a1a2e;
+    }
+
+    #sendBtn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 20px rgba(255, 215, 0, 0.4);
+    }
+
+    #sendBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    #journalBtn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #8b4513, #654321);
+      color: #ffd700;
+      font-size: 1.5em;
+      padding: 15px 20px;
+      border: 2px solid #ffd700;
+      box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+    }
+
+    #journalBtn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 0 30px rgba(255, 215, 0, 0.5);
+    }
+
+    #diaryBtn {
+      position: fixed;
+      top: 20px;
+      right: 90px;
+      background: linear-gradient(135deg, #4a3728, #2d1f1a);
+      color: #d4a574;
+      font-size: 1.5em;
+      padding: 15px 20px;
+      border: 2px solid #d4a574;
+      box-shadow: 0 0 20px rgba(212, 165, 116, 0.3);
+    }
+
+    #diaryBtn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 0 30px rgba(212, 165, 116, 0.5);
+    }
+
+    #diaryBtn.has-new {
+      animation: diaryGlow 2s ease-in-out infinite;
+    }
+
+    @keyframes diaryGlow {
+      0%, 100% { box-shadow: 0 0 20px rgba(212, 165, 116, 0.3); }
+      50% { box-shadow: 0 0 35px rgba(212, 165, 116, 0.7); }
+    }
+
+    /* Diary Modal - Parchment Style */
+    .diary-modal .modal-content {
+      background: linear-gradient(135deg, #f4e4bc, #e8d4a8);
+      border: 3px solid #8b7355;
+      max-width: 650px;
+    }
+
+    .diary-modal .modal-header {
+      background: linear-gradient(135deg, #6b5344, #4a3728);
+      border-bottom: 2px solid #8b7355;
+    }
+
+    .diary-modal .modal-header h2 {
+      color: #d4a574;
+      font-family: 'Georgia', serif;
+    }
+
+    .diary-modal .modal-body {
+      color: #3d2914;
+      font-family: 'Georgia', 'Palatino', serif;
+      line-height: 1.8;
+      padding: 30px 40px;
+    }
+
+    .diary-entry {
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 1px dashed #8b7355;
+    }
+
+    .diary-entry:last-child {
+      border-bottom: none;
+    }
+
+    .diary-entry-date {
+      font-size: 0.9em;
+      color: #6b5344;
+      font-style: italic;
+      margin-bottom: 10px;
+    }
+
+    .diary-entry-content {
+      font-size: 1em;
+      text-indent: 2em;
+      white-space: pre-wrap;
+    }
+
+    .diary-entry-content p {
+      margin-bottom: 1em;
+      text-indent: 2em;
+    }
+
+    /* Diary Entry Popup (shown on sleep) */
+    .diary-popup {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .diary-popup.active {
+      display: flex;
+    }
+
+    .diary-popup-content {
+      background: linear-gradient(135deg, #f4e4bc, #e8d4a8);
+      border: 4px solid #8b7355;
+      border-radius: 5px;
+      max-width: 550px;
+      width: 90%;
+      max-height: 70vh;
+      overflow-y: auto;
+      padding: 40px;
+      box-shadow: 0 0 60px rgba(139, 115, 85, 0.5);
+      color: #3d2914;
+      font-family: 'Georgia', 'Palatino', serif;
+      line-height: 1.8;
+      animation: diaryFadeIn 1s ease-out;
+    }
+
+    @keyframes diaryFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .diary-popup-title {
+      text-align: center;
+      font-size: 1.3em;
+      color: #6b5344;
+      font-style: italic;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #8b7355;
+    }
+
+    .diary-popup-text {
+      font-size: 1em;
+      white-space: pre-wrap;
+    }
+
+    .diary-popup-text p {
+      margin-bottom: 1em;
+      text-indent: 2em;
+    }
+
+    .diary-popup-close {
+      display: block;
+      margin: 30px auto 0;
+      padding: 10px 30px;
+      background: linear-gradient(135deg, #6b5344, #4a3728);
+      color: #d4a574;
+      border: 2px solid #8b7355;
+      border-radius: 5px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 1em;
+    }
+
+    .diary-popup-close:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 3px 15px rgba(107, 83, 68, 0.4);
+    }
+
+    /* Writing animation for diary */
+    .diary-writing {
+      overflow: hidden;
+      animation: typewriter 3s steps(100, end);
+    }
+
+    @keyframes typewriter {
+      from { max-height: 0; }
+      to { max-height: 1000px; }
+    }
+
+    /* Exhaustion Display */
+    .exhaustion-display {
+      text-align: center;
+      padding: 8px;
+    }
+
+    .exhaustion-bar {
+      height: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .exhaustion-fill {
+      height: 100%;
+      transition: width 0.5s ease, background 0.5s ease;
+      border-radius: 4px;
+    }
+
+    .exhaustion-fill.rested { background: linear-gradient(90deg, #68d391, #48bb78); width: 0%; }
+    .exhaustion-fill.alert { background: linear-gradient(90deg, #68d391, #48bb78); }
+    .exhaustion-fill.tired { background: linear-gradient(90deg, #ecc94b, #d69e2e); }
+    .exhaustion-fill.exhausted { background: linear-gradient(90deg, #ed8936, #dd6b20); }
+    .exhaustion-fill.severe { background: linear-gradient(90deg, #fc8181, #f56565); }
+
+    .exhaustion-info {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85em;
+      color: #a0aec0;
+    }
+
+    .exhaustion-status {
+      font-weight: bold;
+    }
+
+    .exhaustion-status.rested { color: #68d391; }
+    .exhaustion-status.energized { color: #90cdf4; }
+    .exhaustion-status.tired { color: #ecc94b; }
+    .exhaustion-status.exhausted { color: #ed8936; }
+    .exhaustion-status.severe { color: #fc8181; }
+
+    /* Journal Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: linear-gradient(135deg, #2c1810, #1a0f0a);
+      border: 3px solid #ffd700;
+      border-radius: 15px;
+      max-width: 700px;
+      width: 90%;
+      max-height: 80vh;
+      overflow: hidden;
+      box-shadow: 0 0 50px rgba(255, 215, 0, 0.3);
+    }
+
+    .modal-header {
+      background: linear-gradient(135deg, #8b4513, #654321);
+      padding: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #ffd700;
+    }
+
+    .modal-header h2 {
+      font-size: 1.8em;
+      color: #ffd700;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: #ffd700;
+      font-size: 2em;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .close-btn:hover {
+      transform: scale(1.2);
+    }
+
+    .modal-body {
+      padding: 30px;
+      overflow-y: auto;
+      max-height: calc(80vh - 100px);
+    }
+
+    .journal-section {
+      margin-bottom: 30px;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 10px;
+      border-left: 3px solid #ffd700;
+    }
+
+    .journal-section h3 {
+      color: #ffd700;
+      font-size: 1.3em;
+      margin-bottom: 15px;
+    }
+
+    .journal-section .updated {
+      color: #8899ac;
+      font-size: 0.9em;
+      font-style: italic;
+      margin-bottom: 10px;
+    }
+
+    .journal-section .reasoning {
+      background: rgba(0, 0, 0, 0.2);
+      padding: 12px 15px;
+      border-radius: 5px;
+      font-size: 0.95em;
+      color: #c0c0c0;
+      line-height: 1.6;
+    }
+
+    .journal-section .reasoning strong {
+      color: #ffd700;
+    }
+
+    .journal-section .reasoning em {
+      color: #90cdf4;
+    }
+
+    .journal-section ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .journal-section li {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 215, 0, 0.1);
+    }
+
+    .journal-section li:last-child {
+      border-bottom: none;
+    }
+
+    .loading {
+      display: inline-block;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .typing-indicator {
+      display: none;
+      color: #8899ac;
+      font-style: italic;
+      padding: 10px;
+    }
+
+    .typing-indicator.active {
+      display: block;
+    }
+
+    @media (max-width: 900px) {
+      .game-layout {
+        flex-direction: column;
+      }
+
+      .side-panel {
+        width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+
+      .panel {
+        flex: 1;
+        min-width: 200px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <button id="diaryBtn" title="Personal Diary">📓</button>
+  <button id="journalBtn" title="Adventure Journal">📖</button>
+
+  <div class="container">
+    <header>
+      <h1>⚔️ Generative RPG</h1>
+      <p class="subtitle">Your adventure awaits... the world remembers.</p>
+    </header>
+
+    <div class="game-layout">
+      <div class="main-content">
+        <div class="chat-container" id="chatContainer">
+          <div class="message dm">
+            <div class="sender">🎭 Dungeon Master</div>
+            <div class="content">Welcome, adventurer. You stand at a crossroads at dawn. Paths lead north, south, east, and west. The morning sun casts long shadows across the dirt road. Where does your journey begin?</div>
+          </div>
+        </div>
+
+        <div class="typing-indicator" id="typingIndicator">
+          <span class="loading">The world is changing...</span>
+        </div>
+
+        <div class="input-container">
+          <input
+            type="text"
+            id="playerInput"
+            placeholder="What do you do?"
+            autocomplete="off"
+          >
+          <button id="sendBtn">⚔️ Act</button>
+        </div>
+      </div>
+
+      <div class="side-panel">
+        <div class="panel">
+          <h3>🕐 World Time</h3>
+          <div class="time-display">
+            <div class="time-date" id="fantasyDate">Loading...</div>
+            <div class="time-details">
+              <span id="timeOfDay">Morning</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="statsPanel" style="display: none;">
+          <h3>🎭 <span id="charNameDisplay">Adventurer</span></h3>
+          <div class="stats-grid" id="statsGrid">
+            <div class="stat-badge" id="mightBadge"><span class="stat-val">2</span><span class="stat-label">Might</span></div>
+            <div class="stat-badge" id="agilityBadge"><span class="stat-val">2</span><span class="stat-label">Agility</span></div>
+            <div class="stat-badge" id="mindBadge"><span class="stat-val">2</span><span class="stat-label">Mind</span></div>
+            <div class="stat-badge" id="presenceBadge"><span class="stat-val">2</span><span class="stat-label">Presence</span></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>🧍 Condition</h3>
+          <div class="condition-display" id="conditionDisplay">
+            <span class="condition-status healthy">Healthy</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>😴 Exhaustion</h3>
+          <div class="exhaustion-display" id="exhaustionDisplay">
+            <div class="exhaustion-bar">
+              <div class="exhaustion-fill rested" id="exhaustionFill" style="width: 0%"></div>
+            </div>
+            <div class="exhaustion-info">
+              <span id="exhaustionHours">0h awake</span>
+              <span class="exhaustion-status rested" id="exhaustionStatus">Rested</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>💰 Coin Purse</h3>
+          <div class="coin-display" id="coinDisplay">
+            <div class="coin-type platinum"><span class="amount" id="ppAmount">0</span> pp</div>
+            <div class="coin-type gold"><span class="amount" id="gpAmount">1</span> gp</div>
+            <div class="coin-type silver"><span class="amount" id="spAmount">5</span> sp</div>
+            <div class="coin-type copper"><span class="amount" id="cpAmount">0</span> cp</div>
+          </div>
+        </div>
+
+        <div class="panel inventory-panel">
+          <h3>⚔️ Inventory</h3>
+          <div class="inventory-list" id="inventoryList">
+            <div class="empty-inventory">Empty...</div>
+          </div>
+        </div>
+
+        <div class="side-buttons">
+          <button class="save-btn" id="exportBtn">💾 Export Save</button>
+          <button class="save-btn" id="importBtn">📂 Import Save</button>
+          <input type="file" id="importFile" class="hidden-input" accept=".json">
+          <button class="reset-btn" id="resetBtn">🔄 Reset Adventure</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Journal Modal -->
+  <div class="modal" id="journalModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>📖 Adventure Journal</h2>
+        <button class="close-btn" id="closeJournal">×</button>
+      </div>
+      <div class="modal-body" id="journalBody">
+        <p style="text-align: center; color: #8899ac;">Loading your adventures...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Character Creation Modal -->
+  <div class="modal" id="characterModal">
+    <div class="modal-content" style="max-width: 450px;">
+      <div class="modal-header">
+        <h2>⚔️ Create Your Character</h2>
+      </div>
+      <div class="modal-body">
+        <div class="char-form">
+          <div class="char-field">
+            <label for="charName">Name</label>
+            <input type="text" id="charName" placeholder="Enter your name..." maxlength="30">
+          </div>
+
+          <div class="char-points">
+            <span>Points remaining: <strong id="pointsLeft">0</strong></span>
+          </div>
+
+          <div class="char-stats">
+            <div class="stat-row">
+              <div class="stat-info">
+                <span class="stat-name">💪 MIGHT</span>
+                <span class="stat-desc">Physical power, melee damage, endurance</span>
+              </div>
+              <div class="stat-control">
+                <button class="stat-btn" onclick="adjustStat('might', -1)">−</button>
+                <span class="stat-value" id="mightValue">2</span>
+                <button class="stat-btn" onclick="adjustStat('might', 1)">+</button>
+                <span class="stat-effect" id="mightEffect">Normal</span>
+              </div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-info">
+                <span class="stat-name">🏃 AGILITY</span>
+                <span class="stat-desc">Attack accuracy, dodging, stealth</span>
+              </div>
+              <div class="stat-control">
+                <button class="stat-btn" onclick="adjustStat('agility', -1)">−</button>
+                <span class="stat-value" id="agilityValue">2</span>
+                <button class="stat-btn" onclick="adjustStat('agility', 1)">+</button>
+                <span class="stat-effect" id="agilityEffect">Normal</span>
+              </div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-info">
+                <span class="stat-name">🧠 MIND</span>
+                <span class="stat-desc">Knowledge, perception, puzzles</span>
+              </div>
+              <div class="stat-control">
+                <button class="stat-btn" onclick="adjustStat('mind', -1)">−</button>
+                <span class="stat-value" id="mindValue">2</span>
+                <button class="stat-btn" onclick="adjustStat('mind', 1)">+</button>
+                <span class="stat-effect" id="mindEffect">Normal</span>
+              </div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat-info">
+                <span class="stat-name">✨ PRESENCE</span>
+                <span class="stat-desc">Social, persuasion, intimidation</span>
+              </div>
+              <div class="stat-control">
+                <button class="stat-btn" onclick="adjustStat('presence', -1)">−</button>
+                <span class="stat-value" id="presenceValue">2</span>
+                <button class="stat-btn" onclick="adjustStat('presence', 1)">+</button>
+                <span class="stat-effect" id="presenceEffect">Normal</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="char-legend">
+            <span class="legend-item adv">3 = Advantage (roll 2d20, take higher)</span>
+            <span class="legend-item normal">2 = Normal (roll 1d20)</span>
+            <span class="legend-item dis">1 = Disadvantage (roll 2d20, take lower)</span>
+          </div>
+
+          <button class="create-btn" id="createCharBtn" onclick="createCharacter()">Begin Adventure</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset Confirm Modal -->
+  <div class="modal" id="resetModal">
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <h2>⚠️ Reset Adventure?</h2>
+        <button class="close-btn" id="closeReset">×</button>
+      </div>
+      <div class="modal-body" style="text-align: center;">
+        <p style="margin-bottom: 20px;">This will delete all your progress, inventory, and memories. This cannot be undone!</p>
+        <div style="display: flex; gap: 10px; justify-content: center;">
+          <button class="reset-btn" id="confirmReset" style="margin: 0;">Yes, Reset</button>
+          <button onclick="document.getElementById('resetModal').classList.remove('active')" style="background: #4a5568; margin: 0;">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Diary Modal -->
+  <div class="modal diary-modal" id="diaryModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>📓 Personal Diary</h2>
+        <button class="close-btn" id="closeDiary">×</button>
+      </div>
+      <div class="modal-body" id="diaryBody">
+        <p style="text-align: center; color: #6b5344; font-style: italic;">Your diary is empty. Rest and reflect to write your first entry...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Diary Entry Popup (shown when sleeping) -->
+  <div class="diary-popup" id="diaryPopup">
+    <div class="diary-popup-content">
+      <div class="diary-popup-title">Before sleep, you write in your diary...</div>
+      <div class="diary-popup-text diary-writing" id="diaryPopupText"></div>
+      <button class="diary-popup-close" id="closeDiaryPopup">Close Diary</button>
+    </div>
+  </div>
+
+  <script>
+    const chatContainer = document.getElementById('chatContainer');
+    const playerInput = document.getElementById('playerInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const typingIndicator = document.getElementById('typingIndicator');
+    const journalBtn = document.getElementById('journalBtn');
+    const journalModal = document.getElementById('journalModal');
+    const closeJournal = document.getElementById('closeJournal');
+    const journalBody = document.getElementById('journalBody');
+    const ppAmount = document.getElementById('ppAmount');
+    const gpAmount = document.getElementById('gpAmount');
+    const spAmount = document.getElementById('spAmount');
+    const cpAmount = document.getElementById('cpAmount');
+    const inventoryList = document.getElementById('inventoryList');
+    const resetBtn = document.getElementById('resetBtn');
+    const resetModal = document.getElementById('resetModal');
+    const closeReset = document.getElementById('closeReset');
+    const confirmReset = document.getElementById('confirmReset');
+    const fantasyDate = document.getElementById('fantasyDate');
+    const timeOfDay = document.getElementById('timeOfDay');
+    const conditionDisplay = document.getElementById('conditionDisplay');
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const importFile = document.getElementById('importFile');
+    const characterModal = document.getElementById('characterModal');
+    const statsPanel = document.getElementById('statsPanel');
+    const charNameDisplay = document.getElementById('charNameDisplay');
+    const diaryBtn = document.getElementById('diaryBtn');
+    const diaryModal = document.getElementById('diaryModal');
+    const closeDiary = document.getElementById('closeDiary');
+    const diaryBody = document.getElementById('diaryBody');
+    const diaryPopup = document.getElementById('diaryPopup');
+    const diaryPopupText = document.getElementById('diaryPopupText');
+    const closeDiaryPopup = document.getElementById('closeDiaryPopup');
+    const exhaustionFill = document.getElementById('exhaustionFill');
+    const exhaustionHours = document.getElementById('exhaustionHours');
+    const exhaustionStatus = document.getElementById('exhaustionStatus');
+
+    let isLoading = false;
+
+    // Simple markdown parser for basic formatting
+    function parseMarkdown(text) {
+      if (!text) return '';
+      return text
+        // Bold: **text** or __text__
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+        // Italic: *text* or _text_
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/_([^_]+)_/g, '<em>$1</em>')
+        // Strikethrough: ~~text~~
+        .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+        // Code: `text`
+        .replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 5px; border-radius: 3px;">$1</code>')
+        // Line breaks
+        .replace(/\n/g, '<br>');
+    }
+    let playerStats = { might: 2, agility: 2, mind: 2, presence: 2 };
+    const TOTAL_POINTS = 8;
+
+    // Character creation functions
+    function updatePointsDisplay() {
+      const used = playerStats.might + playerStats.agility + playerStats.mind + playerStats.presence;
+      const remaining = TOTAL_POINTS - used;
+      document.getElementById('pointsLeft').textContent = remaining;
+      document.getElementById('createCharBtn').disabled = remaining !== 0;
+    }
+
+    function updateStatEffect(stat, value) {
+      const effectEl = document.getElementById(stat + 'Effect');
+      if (value >= 3) {
+        effectEl.textContent = 'Advantage';
+        effectEl.className = 'stat-effect adv';
+      } else if (value <= 1) {
+        effectEl.textContent = 'Disadvantage';
+        effectEl.className = 'stat-effect dis';
+      } else {
+        effectEl.textContent = 'Normal';
+        effectEl.className = 'stat-effect normal';
+      }
+    }
+
+    window.adjustStat = function(stat, delta) {
+      const newValue = playerStats[stat] + delta;
+      if (newValue < 1 || newValue > 3) return;
+
+      const currentTotal = playerStats.might + playerStats.agility + playerStats.mind + playerStats.presence;
+      const newTotal = currentTotal + delta;
+      if (newTotal > TOTAL_POINTS) return;
+
+      playerStats[stat] = newValue;
+      document.getElementById(stat + 'Value').textContent = newValue;
+      updateStatEffect(stat, newValue);
+      updatePointsDisplay();
+    };
+
+    window.createCharacter = async function() {
+      const name = document.getElementById('charName').value.trim() || 'Adventurer';
+
+      try {
+        const response = await fetch('/api/character', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            might: playerStats.might,
+            agility: playerStats.agility,
+            mind: playerStats.mind,
+            presence: playerStats.presence
+          })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          characterModal.classList.remove('active');
+          updateStatsPanel(result.stats);
+          updateInventoryUI();
+        } else {
+          alert('Failed to create character: ' + (result.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Character creation error:', error);
+        alert('Failed to create character');
+      }
+    };
+
+    function updateStatsPanel(stats) {
+      if (!stats || !stats.exists) {
+        statsPanel.style.display = 'none';
+        return;
+      }
+
+      statsPanel.style.display = 'block';
+      charNameDisplay.textContent = stats.name;
+
+      const updateBadge = (id, value) => {
+        const badge = document.getElementById(id);
+        badge.querySelector('.stat-val').textContent = value;
+        badge.className = 'stat-badge' + (value >= 3 ? ' adv' : value <= 1 ? ' dis' : '');
+      };
+
+      updateBadge('mightBadge', stats.might);
+      updateBadge('agilityBadge', stats.agility);
+      updateBadge('mindBadge', stats.mind);
+      updateBadge('presenceBadge', stats.presence);
+    }
+
+    // Check for existing character on load
+    async function checkCharacter() {
+      try {
+        const response = await fetch('/api/character');
+        const stats = await response.json();
+
+        if (!stats.exists) {
+          characterModal.classList.add('active');
+          // Initialize stat effects
+          ['might', 'agility', 'mind', 'presence'].forEach(stat => {
+            updateStatEffect(stat, 2);
+          });
+          updatePointsDisplay();
+        } else {
+          updateStatsPanel(stats);
+        }
+      } catch (error) {
+        console.error('Failed to check character:', error);
+      }
+    }
+
+    // Parse exhaustion state from memory
+    function parseExhaustion(memory) {
+      let exhaustion = {
+        hoursAwake: 0,
+        level: 'Rested',
+        bedBonus: 0
+      };
+
+      const sections = memory.split('##');
+      sections.forEach(section => {
+        if (section.includes('EXHAUSTION')) {
+          const hoursMatch = section.match(/\*\*Hours Awake:\*\*\s*(\d+)/i);
+          const levelMatch = section.match(/\*\*Exhaustion Level:\*\*\s*([^\n]+)/i);
+          const bonusMatch = section.match(/\*\*Bed Bonus Hours:\*\*\s*(-?\d+)/i);
+
+          if (hoursMatch) exhaustion.hoursAwake = parseInt(hoursMatch[1]);
+          if (levelMatch) exhaustion.level = levelMatch[1].trim();
+          if (bonusMatch) exhaustion.bedBonus = parseInt(bonusMatch[1]);
+        }
+      });
+
+      return exhaustion;
+    }
+
+    // Parse diary entries from memory
+    function parseDiaryEntries(memory) {
+      const entries = [];
+      const diaryMatch = memory.match(/## 📖 DIARY[\s\S]*?(?=---|\n## [^📖]|$)/);
+
+      if (diaryMatch) {
+        const section = diaryMatch[0];
+        // Match each diary entry: ### Day X - Location\n content
+        const entryRegex = /### Day (\d+)\s*-?\s*([^\n]*)\n([\s\S]*?)(?=### Day|$)/g;
+        let match;
+        while ((match = entryRegex.exec(section)) !== null) {
+          entries.push({
+            day: parseInt(match[1]),
+            location: match[2].trim() || 'Unknown',
+            content: match[3].trim()
+          });
+        }
+      }
+
+      return entries.sort((a, b) => b.day - a.day); // Most recent first
+    }
+
+    // Update exhaustion UI
+    function updateExhaustionUI(exhaustion) {
+      const hours = exhaustion.hoursAwake;
+      const effectiveHours = hours - exhaustion.bedBonus;
+
+      // Calculate fill percentage (36 hours = 100%)
+      const fillPercent = Math.min((hours / 36) * 100, 100);
+      exhaustionFill.style.width = fillPercent + '%';
+
+      // Update hours display
+      exhaustionHours.textContent = hours + 'h awake';
+
+      // Update status and colors based on exhaustion level
+      let statusClass = 'rested';
+      let level = exhaustion.level.toLowerCase();
+
+      if (level.includes('energized')) {
+        statusClass = 'energized';
+      } else if (level.includes('severely')) {
+        statusClass = 'severe';
+      } else if (level.includes('exhausted')) {
+        statusClass = 'exhausted';
+      } else if (level.includes('tired')) {
+        statusClass = 'tired';
+      }
+
+      exhaustionFill.className = 'exhaustion-fill ' + statusClass;
+      exhaustionStatus.className = 'exhaustion-status ' + statusClass;
+      exhaustionStatus.textContent = exhaustion.level;
+    }
+
+    // Load and display diary
+    async function loadDiary() {
+      try {
+        const response = await fetch('/api/memory');
+        const data = await response.json();
+        const entries = parseDiaryEntries(data.memory);
+
+        if (entries.length === 0) {
+          diaryBody.innerHTML = '<p style="text-align: center; color: #6b5344; font-style: italic;">Your diary is empty. Rest and reflect to write your first entry...</p>';
+          return;
+        }
+
+        let html = '';
+        entries.forEach(entry => {
+          // Format content with paragraphs and parse markdown
+          const formattedContent = entry.content
+            .split('\n\n')
+            .map(p => '<p>' + parseMarkdown(p.trim()) + '</p>')
+            .join('');
+
+          html += `
+            <div class="diary-entry">
+              <div class="diary-entry-date">Day ${entry.day} - ${entry.location}</div>
+              <div class="diary-entry-content">${formattedContent}</div>
+            </div>
+          `;
+        });
+
+        diaryBody.innerHTML = html;
+      } catch (error) {
+        diaryBody.innerHTML = '<p style="text-align: center; color: #a04040;">Failed to load diary</p>';
+      }
+    }
+
+    // Show diary popup with new entry
+    function showDiaryPopup(entryText) {
+      // Format with paragraphs and parse markdown
+      const formattedText = entryText
+        .split('\n\n')
+        .map(p => '<p>' + parseMarkdown(p.trim()) + '</p>')
+        .join('');
+
+      diaryPopupText.innerHTML = formattedText;
+      diaryPopup.classList.add('active');
+
+      // Mark diary button as having new entry
+      diaryBtn.classList.add('has-new');
+    }
+
+    // Parse memory and extract time, coins, inventory, and player state
+    function parseInventory(memory) {
+      let coins = { pp: 0, gp: 0, sp: 0, cp: 0 };
+      let items = [];
+      let worldTime = { fantasyDate: '', day: 1, time: 'Morning' };
+      let playerCondition = 'Healthy';
+      let exhaustion = { hoursAwake: 0, level: 'Rested', bedBonus: 0 };
+
+      const sections = memory.split('##');
+
+      sections.forEach(section => {
+        const lines = section.trim().split('\n');
+        const title = lines[0].trim();
+
+        // Check if section contains WORLD_TIME (handles emoji prefix)
+        if (title.includes('WORLD_TIME')) {
+          const content = section;
+          const dateMatch = content.match(/\*\*Fantasy Date:\*\*\s*([^\n]+)/i);
+          const dayMatch = content.match(/\*\*Day Count:\*\*\s*(\d+)/i);
+          const timeMatch = content.match(/\*\*Time of Day:\*\*\s*([^\n]+)/i);
+          if (dateMatch) worldTime.fantasyDate = dateMatch[1].trim();
+          if (dayMatch) worldTime.day = parseInt(dayMatch[1]);
+          if (timeMatch) worldTime.time = timeMatch[1].trim();
+        }
+
+        // Check if section contains PLAYER_STATE (handles emoji prefix)
+        if (title.includes('PLAYER_STATE')) {
+          const conditionMatch = section.match(/\*\*Condition:\*\*\s*([^\n]+)/i);
+          if (conditionMatch) playerCondition = conditionMatch[1].trim();
+        }
+
+        // Check if section contains COIN_LEDGER (preferred, accurate double-entry)
+        if (title.includes('COIN_LEDGER')) {
+          const ppMatch = section.match(/\*\*Balance PP:\*\*\s*(\d+)/i);
+          const gpMatch = section.match(/\*\*Balance GP:\*\*\s*(\d+)/i);
+          const spMatch = section.match(/\*\*Balance SP:\*\*\s*(\d+)/i);
+          const cpMatch = section.match(/\*\*Balance CP:\*\*\s*(\d+)/i);
+
+          if (ppMatch) coins.pp = parseInt(ppMatch[1]);
+          if (gpMatch) coins.gp = parseInt(gpMatch[1]);
+          if (spMatch) coins.sp = parseInt(spMatch[1]);
+          if (cpMatch) coins.cp = parseInt(cpMatch[1]);
+
+          console.log('Parsed from COIN_LEDGER:', coins);
+        }
+
+        // Also check COIN_PURSE as backup
+        if (title.includes('COIN_PURSE')) {
+          // Parse multi-currency format
+          const ppMatch = section.match(/\*\*Platinum.*?:\*\*\s*(\d+)/i);
+          const gpMatch = section.match(/\*\*Gold.*?:\*\*\s*(\d+)/i);
+          const spMatch = section.match(/\*\*Silver.*?:\*\*\s*(\d+)/i);
+          const cpMatch = section.match(/\*\*Copper.*?:\*\*\s*(\d+)/i);
+
+          // Only use COIN_PURSE values if ledger was empty/zero
+          const purseCoins = {
+            pp: ppMatch ? parseInt(ppMatch[1]) : 0,
+            gp: gpMatch ? parseInt(gpMatch[1]) : 0,
+            sp: spMatch ? parseInt(spMatch[1]) : 0,
+            cp: cpMatch ? parseInt(cpMatch[1]) : 0
+          };
+
+          // Use purse values if they're higher (ledger might be corrupted/zero)
+          if (purseCoins.pp + purseCoins.gp + purseCoins.sp + purseCoins.cp >
+              coins.pp + coins.gp + coins.sp + coins.cp) {
+            coins = purseCoins;
+            console.log('Using COIN_PURSE instead:', coins);
+          }
+        }
+
+        // Check if section contains INVENTORY (handles emoji prefix)
+        if (title.includes('INVENTORY')) {
+          // Find where items start (after "**Items:**" line)
+          let inItems = false;
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+
+            // Start parsing after we see the Items header
+            if (line.includes('**Items:**')) {
+              inItems = true;
+              continue;
+            }
+
+            // Stop at next section or empty line before items
+            if (!inItems) continue;
+            if (line.startsWith('---') || line.trim() === '') break;
+
+            // Match item patterns:
+            // - [v#] Item Name (description)
+            // - [Day X - Time] Item Name (description) - extra notes
+            const match = line.match(/^-\s*\[([^\]]+)\]\s+(.+)$/);
+            if (match) {
+              const fullItemText = match[2];
+              // Extract item name and optional description in parentheses
+              const nameDescMatch = fullItemText.match(/^([^(]+?)(?:\s*\(([^)]+)\))?(?:\s*-\s*(.+))?$/);
+              if (nameDescMatch) {
+                const itemName = nameDescMatch[1].trim();
+                const itemDesc = nameDescMatch[2] || '';
+                const extraNotes = nameDescMatch[3] || '';
+                items.push({
+                  name: itemName,
+                  desc: itemDesc + (extraNotes ? ' - ' + extraNotes : '')
+                });
+              } else {
+                items.push({
+                  name: fullItemText.trim(),
+                  desc: ''
+                });
+              }
+            }
+          }
+        }
+      });
+
+      // Parse exhaustion
+      sections.forEach(section => {
+        if (section.includes('EXHAUSTION')) {
+          const hoursMatch = section.match(/\*\*Hours Awake:\*\*\s*(\d+)/i);
+          const levelMatch = section.match(/\*\*Exhaustion Level:\*\*\s*([^\n]+)/i);
+          const bonusMatch = section.match(/\*\*Bed Bonus Hours:\*\*\s*(-?\d+)/i);
+
+          if (hoursMatch) exhaustion.hoursAwake = parseInt(hoursMatch[1]);
+          if (levelMatch) exhaustion.level = levelMatch[1].trim();
+          if (bonusMatch) exhaustion.bedBonus = parseInt(bonusMatch[1]);
+        }
+      });
+
+      console.log('Parsed inventory:', { coins, items, worldTime, playerCondition, exhaustion });
+      return { coins, items, worldTime, playerCondition, exhaustion };
+    }
+
+    // Update UI with current inventory, time, and player state
+    function updateInventoryUI() {
+      fetch('/api/memory')
+        .then(res => res.json())
+        .then(data => {
+          const { coins, items, worldTime, playerCondition, exhaustion } = parseInventory(data.memory);
+
+          // Update exhaustion display
+          updateExhaustionUI(exhaustion);
+
+          // Update currency display
+          ppAmount.textContent = coins.pp;
+          gpAmount.textContent = coins.gp;
+          spAmount.textContent = coins.sp;
+          cpAmount.textContent = coins.cp;
+
+          // Update time display
+          if (worldTime.fantasyDate) {
+            fantasyDate.textContent = worldTime.fantasyDate;
+          } else {
+            fantasyDate.textContent = 'Loading...';
+          }
+          timeOfDay.textContent = worldTime.time;
+
+          // Update condition display
+          const conditionLower = playerCondition.toLowerCase();
+          let conditionClass = 'healthy';
+          if (conditionLower.includes('critical')) conditionClass = 'critical';
+          else if (conditionLower.includes('wounded')) conditionClass = 'wounded';
+          else if (conditionLower.includes('exhausted')) conditionClass = 'exhausted';
+          else if (conditionLower.includes('tired')) conditionClass = 'tired';
+
+          conditionDisplay.innerHTML = `<span class="condition-status ${conditionClass}">${playerCondition}</span>`;
+
+          if (items.length === 0) {
+            inventoryList.innerHTML = '<div class="empty-inventory">Empty...</div>';
+          } else {
+            inventoryList.innerHTML = items.map(item => `
+              <div class="inventory-item">
+                <div class="item-name">${parseMarkdown(item.name)}</div>
+                ${item.desc ? `<div class="item-desc">${parseMarkdown(item.desc)}</div>` : ''}
+              </div>
+            `).join('');
+          }
+        })
+        .catch(err => console.error('Failed to load inventory:', err));
+    }
+
+    // Add message to chat
+    function addMessage(sender, content, isPlayer, rolls = null) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${isPlayer ? 'player' : 'dm'}`;
+
+      // Parse markdown in content
+      const formattedContent = parseMarkdown(content);
+
+      let rollsHtml = '';
+      if (rolls && !isPlayer) {
+        rollsHtml = `
+          <div class="roll-display">
+            <div class="roll-title">🎲 Dice Rolls</div>
+            ${formatRollItem('Might', rolls.might)}
+            ${formatRollItem('Agility', rolls.agility)}
+            ${formatRollItem('Mind', rolls.mind)}
+            ${formatRollItem('Presence', rolls.presence)}
+          </div>
+        `;
+      }
+
+      messageDiv.innerHTML = `
+        <div class="sender">${sender}</div>
+        <div class="content">${formattedContent}</div>
+        ${rollsHtml}
+      `;
+      chatContainer.appendChild(messageDiv);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function formatRollItem(name, roll) {
+      const typeLabel = roll.type === 'advantage' ? 'ADV' : roll.type === 'disadvantage' ? 'DIS' : '';
+      const rollStr = roll.rolls.length > 1 ? `[${roll.rolls.join(', ')}] = ${roll.result}` : `${roll.result}`;
+      let extraClass = '';
+      if (roll.result === 20) extraClass = 'crit';
+      else if (roll.result === 1) extraClass = 'critfail';
+      else if (roll.type === 'advantage') extraClass = 'adv';
+      else if (roll.type === 'disadvantage') extraClass = 'dis';
+
+      return `<div class="roll-item ${extraClass}">
+        <span>${name} ${typeLabel ? `(${typeLabel})` : ''}</span>
+        <span class="roll-result">${rollStr}</span>
+      </div>`;
+    }
+
+    // Send chat message
+    async function sendMessage() {
+      const message = playerInput.value.trim();
+      if (!message || isLoading) return;
+
+      isLoading = true;
+      sendBtn.disabled = true;
+      typingIndicator.classList.add('active');
+
+      addMessage('👤 You', message, true);
+      playerInput.value = '';
+
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+          addMessage('❌ Error', data.error, false);
+        } else {
+          addMessage('🎭 Dungeon Master', data.response, false, data.rolls);
+          updateInventoryUI();
+          if (data.stats) updateStatsPanel(data.stats);
+
+          // Show diary popup if sleep occurred and diary entry was generated
+          console.log('Response data:', { sleepOccurred: data.sleepOccurred, hasDiaryEntry: !!data.diaryEntry });
+          if (data.sleepOccurred && data.diaryEntry) {
+            console.log('Showing diary popup!');
+            // Small delay for dramatic effect
+            setTimeout(() => {
+              showDiaryPopup(data.diaryEntry);
+            }, 500);
+          }
+
+          // Show message if player couldn't sleep
+          if (data.cantSleep) {
+            // The response already contains the "can't sleep" message
+          }
+        }
+      } catch (error) {
+        addMessage('❌ Error', 'The world seems to be having trouble... Try again.', false);
+        console.error('Error:', error);
+      }
+
+      isLoading = false;
+      sendBtn.disabled = false;
+      typingIndicator.classList.remove('active');
+      playerInput.focus();
+    }
+
+    // Load and display journal
+    async function loadJournal() {
+      try {
+        const response = await fetch('/api/memory');
+        const data = await response.json();
+        const memory = data.memory;
+
+        // Find the first section (WORLD_TIME starts with # 🕐)
+        const firstSectionIndex = memory.indexOf('# 🕐');
+        const bodyContent = firstSectionIndex > -1 ? memory.slice(firstSectionIndex) : memory;
+
+        // Split by ## and also handle the first # section
+        const sections = [];
+
+        // Extract first section (starts with #)
+        const firstSectionEnd = bodyContent.indexOf('\n##');
+        if (firstSectionEnd > -1) {
+          sections.push(bodyContent.slice(0, firstSectionEnd));
+          // Get the rest and split by ##
+          const rest = bodyContent.slice(firstSectionEnd + 1);
+          const moreSections = rest.split('##').filter(s => s.trim());
+          sections.push(...moreSections);
+        } else {
+          sections.push(...bodyContent.split('##').filter(s => s.trim()));
+        }
+
+        let html = '';
+
+        sections.forEach(section => {
+          const lines = section.trim().split('\n');
+          const title = lines[0].trim();
+          const content = lines.slice(1).join('\n');
+
+          // Determine icon based on title content (handles emoji prefixes)
+          let icon = '📜';
+          if (title.includes('WORLD_TIME')) icon = '🕐';
+          else if (title.includes('PLAYER_STATE')) icon = '🧍';
+          else if (title.includes('COIN_PURSE')) icon = '💰';
+          else if (title.includes('INVENTORY')) icon = '⚔️';
+          else if (title.includes('LOCATIONS')) icon = '📍';
+          else if (title.includes('PEOPLE')) icon = '👥';
+          else if (title.includes('GENERAL_FACTS')) icon = '📜';
+
+          // Parse markdown for proper display
+          const displayContent = parseMarkdown(
+            content
+              .replace(/^---$/gm, '')
+              .trim()
+          );
+
+          // Strip emoji from title for display (since icon already shows it)
+          const displayTitle = title.replace(/^[^\w\s]+/, '').replace(/_/g, ' ').trim();
+
+          html += `
+            <div class="journal-section">
+              <h3>${icon} ${displayTitle}</h3>
+              <div class="reasoning" style="white-space: pre-wrap;">${displayContent}</div>
+            </div>
+          `;
+        });
+
+        journalBody.innerHTML = html || '<p style="text-align: center; color: #8899ac;">Your journey is just beginning...</p>';
+      } catch (error) {
+        journalBody.innerHTML = '<p style="text-align: center; color: #ff6b6b;">Failed to load journal</p>';
+      }
+    }
+
+    // Reset adventure
+    async function resetAdventure() {
+      try {
+        const response = await fetch('/api/reset', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.success) {
+          resetModal.classList.remove('active');
+          chatContainer.innerHTML = `
+            <div class="message dm">
+              <div class="sender">🎭 Dungeon Master</div>
+              <div class="content">Welcome, adventurer. You stand at a crossroads at dawn. Paths lead north, south, east, and west. The morning sun casts long shadows across the dirt road. Where does your journey begin?</div>
+            </div>
+          `;
+          // Reset character creation state
+          playerStats = { might: 2, agility: 2, mind: 2, presence: 2 };
+          ['might', 'agility', 'mind', 'presence'].forEach(stat => {
+            document.getElementById(stat + 'Value').textContent = 2;
+            updateStatEffect(stat, 2);
+          });
+          updatePointsDisplay();
+          statsPanel.style.display = 'none';
+          characterModal.classList.add('active');
+          updateInventoryUI();
+        }
+      } catch (error) {
+        console.error('Reset failed:', error);
+      }
+    }
+
+    // Event listeners
+    sendBtn.addEventListener('click', sendMessage);
+    playerInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendMessage();
+    });
+
+    journalBtn.addEventListener('click', () => {
+      journalModal.classList.add('active');
+      loadJournal();
+    });
+
+    closeJournal.addEventListener('click', () => {
+      journalModal.classList.remove('active');
+    });
+
+    journalModal.addEventListener('click', (e) => {
+      if (e.target === journalModal) {
+        journalModal.classList.remove('active');
+      }
+    });
+
+    // Diary modal events
+    diaryBtn.addEventListener('click', () => {
+      diaryModal.classList.add('active');
+      diaryBtn.classList.remove('has-new');
+      loadDiary();
+    });
+
+    closeDiary.addEventListener('click', () => {
+      diaryModal.classList.remove('active');
+    });
+
+    diaryModal.addEventListener('click', (e) => {
+      if (e.target === diaryModal) {
+        diaryModal.classList.remove('active');
+      }
+    });
+
+    // Diary popup (after sleep) events
+    closeDiaryPopup.addEventListener('click', () => {
+      diaryPopup.classList.remove('active');
+    });
+
+    diaryPopup.addEventListener('click', (e) => {
+      if (e.target === diaryPopup) {
+        diaryPopup.classList.remove('active');
+      }
+    });
+
+    resetBtn.addEventListener('click', () => {
+      resetModal.classList.add('active');
+    });
+
+    closeReset.addEventListener('click', () => {
+      resetModal.classList.remove('active');
+    });
+
+    resetModal.addEventListener('click', (e) => {
+      if (e.target === resetModal) {
+        resetModal.classList.remove('active');
+      }
+    });
+
+    confirmReset.addEventListener('click', resetAdventure);
+
+    // Export save
+    exportBtn.addEventListener('click', () => {
+      window.location.href = '/api/export';
+    });
+
+    // Import save
+    importBtn.addEventListener('click', () => {
+      importFile.click();
+    });
+
+    importFile.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const saveData = JSON.parse(text);
+
+        const response = await fetch('/api/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(saveData)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Reload chat with imported history
+          chatContainer.innerHTML = '';
+          if (saveData.conversationHistory && saveData.conversationHistory.length > 0) {
+            saveData.conversationHistory.forEach(msg => {
+              if (msg.role === 'user') {
+                addMessage('👤 You', msg.content, true);
+              } else {
+                addMessage('🎭 Dungeon Master', msg.content, false);
+              }
+            });
+          } else {
+            chatContainer.innerHTML = `
+              <div class="message dm">
+                <div class="sender">🎭 Dungeon Master</div>
+                <div class="content">Save loaded. Your adventure continues...</div>
+              </div>
+            `;
+          }
+          updateInventoryUI();
+          checkCharacter(); // Reload character stats
+          alert('Save imported successfully!');
+        } else {
+          alert('Failed to import save: ' + (result.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Import error:', error);
+        alert('Failed to read save file. Make sure it\'s a valid RPG save.');
+      }
+
+      // Reset file input
+      importFile.value = '';
+    });
+
+    // Initial load
+    checkCharacter();
+    updateInventoryUI();
+    playerInput.focus();
+  </script>
+</body>
+</html>
