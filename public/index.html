@@ -1086,6 +1086,7 @@
         </div>
 
         <div class="side-buttons">
+          <button class="save-btn" id="refreshBtn">🔃 Refresh UI</button>
           <button class="save-btn" id="exportBtn">💾 Export Save</button>
           <button class="save-btn" id="importBtn">📂 Import Save</button>
           <input type="file" id="importFile" class="hidden-input" accept=".json">
@@ -1634,8 +1635,6 @@
             // Skip metadata lines like **Last Updated:** or **Items:**
             if (line.trim().startsWith('**')) continue;
             if (line.trim() === '') continue;
-            // Skip removed items (tracked in history but not shown in active inventory)
-            if (/^\-\s*\[REMOVED/i.test(line.trim())) continue;
 
             // Match bracketed format: - [v#] or - [Day X - Time]
             const bracketMatch = line.match(/^-\s*\[([^\]]+)\]\s+(.+)$/);
@@ -1988,6 +1987,12 @@
     });
 
     confirmReset.addEventListener('click', resetAdventure);
+
+    // Refresh UI
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+      updateInventoryUI();
+      checkCharacter();
+    });
 
     // Export save
     exportBtn.addEventListener('click', () => {

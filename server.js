@@ -415,70 +415,6 @@ function updateCoinPurse(memory, balance, currentDay, currentTime) {
   );
 }
 
-// ============================================
-// INVENTORY TRACKING SYSTEM
-// ============================================
-
-// Extract INVENTORY_DIFF block from World LLM output and return parsed diff + cleaned text
-function extractInventoryDiff(worldResponse) {
-  const diffMatch = worldResponse.match(/<!--\s*INVENTORY_DIFF\s*([\s\S]*?)-->/);
-  if (!diffMatch) return { gained: [], lost: [], cleaned: worldResponse };
-
-  const gained = [];
-  const lost = [];
-  for (const line of diffMatch[1].split('\n')) {
-    const t = line.trim();
-    if (t.startsWith('GAINED:')) gained.push(t.slice(7).trim());
-    else if (t.startsWith('LOST:')) lost.push(t.slice(5).trim());
-  }
-
-  const cleaned = worldResponse.replace(/\n*<!--\s*INVENTORY_DIFF[\s\S]*?-->\s*/g, '').trim();
-  return { gained, lost, cleaned };
-}
-
-// Fuzzy-match an inventory line against a lost-item description
-function inventoryLineMatchesLost(line, lostDesc) {
-  const lineLower = line.toLowerCase();
-  const lostLower = lostDesc.toLowerCase();
-  if (lineLower.includes(lostLower)) return true;
-  // Word-overlap fallback: ≥60% of significant words (len > 3) must appear in the line
-  const lostWords = lostLower.split(/\W+/).filter(w => w.length > 3);
-  if (lostWords.length === 0) return false;
-  const matches = lostWords.filter(w => lineLower.includes(w));
-  return matches.length >= Math.ceil(lostWords.length * 0.6);
-}
-
-// Apply gained/lost diff to the INVENTORY section in memory
-function applyInventoryDiff(memory, gained, lost, currentDay, currentTime) {
-  if (gained.length === 0 && lost.length === 0) return memory;
-
-  const inventoryRegex = /## [^\n]*INVENTORY[\s\S]*?(?=\n##|$)/;
-  const inventoryMatch = memory.match(inventoryRegex);
-  if (!inventoryMatch) return memory;
-
-  let sectionLines = inventoryMatch[0].split('\n');
-
-  // Mark lost items with [REMOVED] and strikethrough
-  sectionLines = sectionLines.map(line => {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('-')) return line;
-    if (/\[REMOVED/i.test(trimmed)) return line; // already marked
-    for (const lostDesc of lost) {
-      if (inventoryLineMatchesLost(trimmed, lostDesc)) {
-        return `- [REMOVED Day ${currentDay} - ${currentTime}] ~~${trimmed.slice(2).trim()}~~`;
-      }
-    }
-    return line;
-  });
-
-  // Append gained items
-  for (const item of gained) {
-    const entry = item.startsWith('[') ? `- ${item}` : `- [Day ${currentDay} - ${currentTime}] ${item}`;
-    sectionLines.push(entry);
-  }
-
-  return memory.replace(inventoryRegex, sectionLines.join('\n'));
-}
 
 // Bed quality tiers and their effects
 const BED_QUALITY = {
@@ -1053,17 +989,6 @@ CHARACTER_VOICE SECTION (when newVoice in SLEEP_DATA):
 - If you modify coin values, the game breaks
 - Just preserve these sections byte-for-byte in your output
 
-⚠️ INVENTORY SECTION - DO NOT MODIFY DIRECTLY ⚠️
-- COPY the INVENTORY section EXACTLY as it appears in the input - do not add, remove, or edit any item lines
-- Instead, report inventory changes at the VERY END of your output using this exact format:
-  <!-- INVENTORY_DIFF
-  GAINED: [Day X - TimeOfDay] Item Name (brief description of how it was obtained)
-  LOST: item name or enough words to identify it
-  -->
-- Use GAINED for items the player just acquired (picked up, bought, received, crafted, found)
-- Use LOST for items used up, consumed, dropped, sold, given away, or destroyed
-- One entry per line; multiple GAINED/LOST lines are fine
-- If no inventory changes occurred this turn, omit the INVENTORY_DIFF block entirely
 
 CRITICAL RULES FOR GENERAL_FACTS (RUMORS & LORE):
 - NEVER include date/time information in GENERAL_FACTS section
@@ -1091,14 +1016,14 @@ OTHER RULES:
 - Add NEW entries at the top of each section with date/time stamps
 - For EVERY new entry, prepend with "[Day X - TimeOfDay]" to show when it happened
 - For COIN_PURSE: add transaction entries like "[Day 3 - Evening] Paid 2 coins for ale"
+- For INVENTORY: add entries like "[Day 2 - Morning] Found rusty sword" or mark removed items as "[Day 2 - Morning] REMOVED: rope (used to climb)"
 - For LOCATIONS: add entries like "[Day 1 - Afternoon] Discovered village"
 - For PEOPLE_MET: add entries like "[Day 4 - Noon] Met Elara the merchant"
 - For GENERAL_FACTS: add entries like "[Day 2 - Evening] Heard rumor about dragon in mountains"
 - For PLAYER_STATE: add condition changes like "[Day 2 - Night] Exhausted from travel"
 - REMOVE any <!-- SLEEP_DATA: ... --> comments from the output
-- The <!-- INVENTORY_DIFF ... --> block (if you write one) goes AFTER the memory content, not inside it
 
-Return ONLY the updated memory.md content followed by any INVENTORY_DIFF block. No explanations, no markdown code blocks - just the raw content.`;
+Return ONLY the updated memory.md content. No explanations, no markdown code blocks - just the raw content.`;
 
     const worldResponse = await callGLM(
       [{ role: 'user', content: `Process this action and update memory.` }],
@@ -1138,21 +1063,6 @@ Return ONLY the updated memory.md content followed by any INVENTORY_DIFF block. 
         );
       } else {
         updatedMemory += '\n\n' + preserveCoinLedger[0];
-      }
-    }
-
-    // INVENTORY TRACKING: Extract diff the World LLM reported, then enforce our own inventory state
-    const { gained: invGained, lost: invLost, cleaned: memoryWithoutDiff } = extractInventoryDiff(updatedMemory);
-    updatedMemory = memoryWithoutDiff;
-
-    // Apply the diff to the pre-World-LLM inventory (prevents LLM from silently adding/dropping items)
-    const inventoryApplied = applyInventoryDiff(memory, invGained, invLost, currentDay, currentTime);
-    const updatedInventoryMatch = inventoryApplied.match(/## [^\n]*INVENTORY[\s\S]*?(?=\n##|$)/);
-    if (updatedInventoryMatch) {
-      if (/## [^\n]*INVENTORY/.test(updatedMemory)) {
-        updatedMemory = updatedMemory.replace(/## [^\n]*INVENTORY[\s\S]*?(?=\n##|$)/, updatedInventoryMatch[0]);
-      } else {
-        updatedMemory += '\n\n' + updatedInventoryMatch[0];
       }
     }
 
