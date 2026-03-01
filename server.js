@@ -425,6 +425,67 @@ const BED_QUALITY = {
   NOBLE: { name: 'Noble Bed', exhaustionFloor: 0, bonusHours: 2, statusEffect: 'Energized' }
 };
 
+// ============================================
+// SERVER-SIDE TIME & EXHAUSTION TRACKING
+// ============================================
+
+const TIME_PERIODS = ['Morning', 'Midday', 'Afternoon', 'Evening', 'Night'];
+
+function getTimePeriodIndex(time) {
+  const t = (time || '').trim().toLowerCase();
+  for (let i = 0; i < TIME_PERIODS.length; i++) {
+    if (t.includes(TIME_PERIODS[i].toLowerCase())) return i;
+  }
+  return 0;
+}
+
+// Returns hours elapsed between two time-of-day / day combinations
+function computeHoursElapsed(oldTime, newTime, oldDay, newDay) {
+  const oldIdx = getTimePeriodIndex(oldTime);
+  const newIdx = getTimePeriodIndex(newTime);
+  const dayDiff = (newDay || 1) - (oldDay || 1);
+  const periodDiff = dayDiff * TIME_PERIODS.length + (newIdx - oldIdx);
+  return Math.max(0, periodDiff) * 4;
+}
+
+// Programmatically update the EXHAUSTION section in memory
+function applyTimeProgressionToMemory(memory, hoursElapsed, sleepOccurred, bedQuality, currentDay, currentTime) {
+  const exhaustionSection = memory.match(/## 😴 EXHAUSTION[\s\S]*?(?=\n##|$)/);
+  if (!exhaustionSection) return memory;
+
+  const section = exhaustionSection[0];
+  const hoursMatch = section.match(/\*\*Hours Awake:\*\*\s*(\d+)/i);
+  const currentHours = hoursMatch ? parseInt(hoursMatch[1]) : 0;
+  const bedBonusMatch = section.match(/\*\*Bed Bonus Hours:\*\*\s*(-?\d+)/i);
+  const currentBedBonus = bedBonusMatch ? parseInt(bedBonusMatch[1]) : 0;
+
+  let newHours, newBedBonus;
+  if (sleepOccurred && bedQuality) {
+    newHours = bedQuality.exhaustionFloor;
+    newBedBonus = bedQuality.bonusHours;
+  } else {
+    newHours = currentHours + hoursElapsed;
+    newBedBonus = currentBedBonus;
+  }
+
+  const debuffs = getExhaustionDebuffs(newHours, newBedBonus);
+  const newLevel = debuffs.level;
+
+  let newSection = section
+    .replace(/\*\*Hours Awake:\*\*\s*\d+/i, `**Hours Awake:** ${newHours}`)
+    .replace(/\*\*Exhaustion Level:\*\*\s*[^\n]+/i, `**Exhaustion Level:** ${newLevel}`)
+    .replace(/\*\*Bed Bonus Hours:\*\*\s*-?\d+/i, `**Bed Bonus Hours:** ${newBedBonus}`)
+    .replace(/\*\*Last Updated:\*\*\s*[^\n]+/i, `**Last Updated:** Day ${currentDay}, ${currentTime}`);
+
+  if (sleepOccurred) {
+    newSection = newSection
+      .replace(/\*\*Last Slept Day:\*\*\s*\d+/i, `**Last Slept Day:** ${currentDay}`)
+      .replace(/\*\*Last Slept Time:\*\*\s*[^\n]+/i, `**Last Slept Time:** ${currentTime}`);
+  }
+
+  return memory.replace(/## 😴 EXHAUSTION[\s\S]*?(?=\n##|$)/, newSection);
+}
+
 // Calculate exhaustion debuffs based on hours awake
 function getExhaustionDebuffs(hoursAwake, bedBonus = 0) {
   const effectiveHours = hoursAwake - bedBonus;
@@ -671,6 +732,8 @@ app.post('/api/chat', async (req, res) => {
     const stats = parsePlayerStats(memory);
     const exhaustionState = parseExhaustionState(memory);
     const currentDay = parseCurrentDay(memory);
+    const oldTime = parseCurrentTime(memory);
+    const oldDay = currentDay;
     const characterVoice = parseCharacterVoice(memory);
 
     // Check for unconsciousness (36+ hours awake)
@@ -857,6 +920,7 @@ Keep responses concise (2-3 paragraphs max). Focus on sensory details and player
     // Check if sleep was successful (DM described sleeping)
     let diaryEntry = null;
     let sleepOccurred = false;
+    let bedQuality = null;
     const sleepIndicators = ['sleep', 'slumber', 'rest', 'dreams', 'wake', 'morning comes', 'night passes', 'hours of sleep', 'drift off', 'close your eyes', 'bed', 'pillow', 'blanket', 'mattress'];
     const dmLower = chatResponse.toLowerCase();
 
@@ -867,7 +931,7 @@ Keep responses concise (2-3 paragraphs max). Focus on sensory details and player
       console.log('Sleep occurred! Generating diary entry...');
 
       // Detect bed quality and generate diary
-      const bedQuality = detectBedQuality(message, chatResponse);
+      bedQuality = detectBedQuality(message, chatResponse);
       const eventPool = parseEventPool(memory);
 
       // Generate diary entry
@@ -918,35 +982,11 @@ CRITICAL RULES FOR TIME TRACKING:
   **Season:** [current season]
   **Last Updated:** Day X, TimeOfDay
 
-EXHAUSTION SYSTEM - CRITICAL:
-- Track hours awake in ## 😴 EXHAUSTION section
-- Each time period transition = approximately 4 hours (Morning→Midday = 4 hours, etc.)
-- Format:
-  ## 😴 EXHAUSTION
-  **Hours Awake:** [number]
-  **Last Slept Day:** [day number]
-  **Last Slept Time:** [time of day]
-  **Exhaustion Level:** [Rested/Tired/Exhausted/Severely Exhausted]
-  **Bed Bonus Hours:** [number, can be negative]
-  **Last Updated:** Day X, TimeOfDay
-
-- Exhaustion thresholds:
-  - 0-13 hours: Rested (no penalties)
-  - 14-19 hours: Tired (-1 to all rolls)
-  - 20-27 hours: Exhausted (-2 to all rolls)
-  - 28-35 hours: Severely Exhausted (-3 to all rolls)
-  - 36+ hours: Unconscious (handled separately)
-
-- When player SLEEPS (check for SLEEP_DATA comment):
-  - Reset Hours Awake to 0
-  - Update Last Slept Day/Time to current
-  - Apply bed quality effects (exhaustionFloor = minimum tiredness on wake, bonusHours = extra hours before exhaustion starts)
-  - Set Exhaustion Level based on bed quality:
-    - Noble bed: "Energized" (bonus +2 hours)
-    - Street sleeping: "Tired" (floor of 4 hours fatigue)
+SLEEP HANDLING (when SLEEP_DATA comment present):
   - CLEAR the EVENT_POOL section (new day cycle)
   - ADD the diary entry to ## 📖 DIARY section
   - If newVoice is provided, update ## 🎭 CHARACTER_VOICE section
+  - Do NOT touch the EXHAUSTION section — the server handles it automatically
 
 EVENT POOL TRACKING:
 - Maintain ## 📝 EVENT_POOL section to track significant events since last sleep
@@ -982,12 +1022,16 @@ CHARACTER_VOICE SECTION (when newVoice in SLEEP_DATA):
   **Values:**
   - [value]
 
-⚠️ COIN SECTIONS - ABSOLUTELY DO NOT TOUCH ⚠️
+⚠️ DO NOT TOUCH THESE SECTIONS - COPY THEM EXACTLY ⚠️
+COIN_PURSE & COIN_LEDGER:
 - COPY the ## 💰 COIN_PURSE section EXACTLY as it appears in the input - do not change ANY values
 - COPY the ## 💰 COIN_LEDGER section EXACTLY as it appears in the input - do not change ANY values
 - The accounting system handles all coin updates programmatically
-- If you modify coin values, the game breaks
-- Just preserve these sections byte-for-byte in your output
+
+EXHAUSTION:
+- COPY the ## 😴 EXHAUSTION section EXACTLY as it appears in the input - do not change ANY values
+- The server automatically calculates hours awake from time-of-day transitions
+- If you modify exhaustion values, the tracking breaks
 
 
 CRITICAL RULES FOR GENERAL_FACTS (RUMORS & LORE):
@@ -1036,8 +1080,9 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
       updatedMemory = updatedMemory.split('\n').slice(1, -1).join('\n');
     }
 
-    // SAFETY: Preserve coin sections from the pre-processed memory (with our ledger updates)
-    // The LLM sometimes zeros these out despite instructions
+    // SAFETY: Preserve coin and exhaustion sections from the pre-processed memory
+    // The LLM sometimes modifies these despite instructions
+    const preserveExhaustion = memory.match(/## 😴 EXHAUSTION[\s\S]*?(?=\n##|$)/);
     const preserveCoinPurse = memory.match(/## 💰 COIN_PURSE[\s\S]*?(?=\n##|$)/);
     const preserveCoinLedger = memory.match(/## 💰 COIN_LEDGER[\s\S]*?(?=\n##|$)/);
 
@@ -1064,6 +1109,24 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
       } else {
         updatedMemory += '\n\n' + preserveCoinLedger[0];
       }
+    }
+
+    // SAFETY: Restore EXHAUSTION section (server will recompute it, LLM must not alter it)
+    if (preserveExhaustion) {
+      if (updatedMemory.includes('## 😴 EXHAUSTION')) {
+        updatedMemory = updatedMemory.replace(/## 😴 EXHAUSTION[\s\S]*?(?=\n##|$)/, preserveExhaustion[0]);
+      } else {
+        updatedMemory += '\n\n' + preserveExhaustion[0];
+      }
+    }
+
+    // SERVER-SIDE TIME TRACKING: compute hours elapsed and update EXHAUSTION programmatically
+    const newTime = parseCurrentTime(updatedMemory);
+    const newDay = parseCurrentDay(updatedMemory);
+    const hoursElapsed = computeHoursElapsed(oldTime, newTime, oldDay, newDay);
+    console.log(`Time tracking: ${oldTime}(day ${oldDay}) → ${newTime}(day ${newDay}), hours elapsed: ${hoursElapsed}, sleep: ${sleepOccurred}`);
+    if (hoursElapsed > 0 || sleepOccurred) {
+      updatedMemory = applyTimeProgressionToMemory(updatedMemory, hoursElapsed, sleepOccurred, bedQuality, newDay, newTime);
     }
 
     // Write updated memory
