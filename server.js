@@ -649,13 +649,20 @@ INSTRUCTIONS:
 - Don't just list events - share how they FELT about what happened
 - Reference specific events but through the lens of personal meaning
 - The character should reflect on relationships, fears, hopes, regrets
-- Keep it 3-5 paragraphs
+- Keep the main body 2-4 paragraphs
 - Write naturally, like a real person's diary - not a formal report
 - If this is the first entry, establish the character's voice
 - If exhausted, the entry might be shorter or more raw
 - CRITICAL TIMING: This entry is written at the END of the day, BEFORE going to sleep. The character is tired and winding down, about to rest. They have NOT yet slept. NEVER write from a post-sleep perspective — no "I woke up", no references to dreams, no "after a good night's rest". Write as someone sitting by candlelight, tired, about to close the book and sleep.
 
-Write ONLY the diary entry text. No headers, no "Dear Diary", just the entry itself.`;
+REQUIRED STRUCTURE — after the main body, always end with these two things in order:
+
+1. FUTURE THOUGHT (one paragraph, no label): A genuine forward-looking thought. Could be a plan for tomorrow, a nagging worry about what comes next, something they're hoping for, or a question they can't stop turning over. Not a summary of today — a real thought about what lies ahead. Let it feel unresolved, like something still alive in their mind.
+
+2. THOUGHT OF THE DAY (labeled exactly as shown): Pick one specific moment or detail from today and explore it — don't report it, turn it over. Find the unexpected angle, ask a question it raises, connect it to something bigger or stranger. A real human sitting alone at night, letting one thing stick.
+Format: "Thought of the Day: [the thought]"
+
+Write ONLY the diary entry text. No extra headers. End with the future paragraph, then the Thought of the Day line.`;
 
   const diaryResponse = await callGLM(
     [{ role: 'user', content: 'Write the diary entry.' }],
