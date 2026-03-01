@@ -1168,7 +1168,9 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
     }
 
     // SERVER-SIDE TIME TRACKING: parse Time Spent from World LLM and advance WORLD_TIME
-    const minutesSpent = parseTimeSpent(updatedMemory);
+    let minutesSpent = parseTimeSpent(updatedMemory);
+    // When sleep occurs, ensure at least 6 hours pass (LLM might write a small value or forget)
+    if (sleepOccurred) minutesSpent = Math.max(minutesSpent, 360);
     const { memory: timeMemory, newTime, newDay } = advanceWorldTime(updatedMemory, minutesSpent);
     updatedMemory = timeMemory;
     console.log(`Time tracking: +${minutesSpent}min → ${newTime} (Day ${newDay}), sleep: ${sleepOccurred}`);
