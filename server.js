@@ -14,6 +14,8 @@ app.use(express.static('public'));
 
 const MEMORY_FILE = path.join(__dirname, 'memory.md');
 const HISTORY_FILE = path.join(__dirname, 'history.json');
+const ACTIVITY_LOG_FILE = path.join(__dirname, 'activity_log.md');
+const MAX_LOG_ENTRIES = 500;
 const GLM_API_KEY = process.env.GLM_API_KEY;
 const GLM_API_URL = process.env.GLM_API_URL;
 
@@ -162,10 +164,24 @@ function parseCharacterVoice(memory) {
   return voice;
 }
 
-// Parse current day from memory
+// Parse current day from memory (supports new **Day:** and legacy **Day Count:**)
 function parseCurrentDay(memory) {
-  const dayMatch = memory.match(/\*\*Day Count:\*\*\s*(\d+)/i);
-  return dayMatch ? parseInt(dayMatch[1]) : 1;
+  const newMatch = memory.match(/\*\*Day:\*\*\s*(\d+)/i);
+  if (newMatch) return parseInt(newMatch[1]);
+  const legacyMatch = memory.match(/\*\*Day Count:\*\*\s*(\d+)/i);
+  return legacyMatch ? parseInt(legacyMatch[1]) : 1;
+}
+
+// Parse current month from memory
+function parseCurrentMonth(memory) {
+  const match = memory.match(/\*\*Month:\*\*\s*(\d+)/i);
+  return match ? parseInt(match[1]) : 1;
+}
+
+// Parse current year from memory
+function parseCurrentYear(memory) {
+  const match = memory.match(/\*\*Year:\*\*\s*(\d+)/i);
+  return match ? parseInt(match[1]) : 1;
 }
 
 // Parse current time from memory
@@ -455,11 +471,14 @@ function parseMinutesElapsed(memory) {
   return match ? parseInt(match[1]) : 0;
 }
 
-// Advance WORLD_TIME based on minutesSpent; returns updated memory + new time/day
+// Advance WORLD_TIME based on minutesSpent; returns updated memory + new time/day/month/year
 function advanceWorldTime(memory, minutesSpent) {
   const currentTime = parseCurrentTime(memory);
   const currentDay = parseCurrentDay(memory);
+  const currentMonth = parseCurrentMonth(memory);
+  const currentYear = parseCurrentYear(memory);
   const minutesElapsed = parseMinutesElapsed(memory);
+  const calendar = parseCalendar(memory);
 
   const totalMinutes = minutesElapsed + minutesSpent;
   const periodAdvances = Math.floor(totalMinutes / PERIOD_MINUTES);
@@ -467,45 +486,83 @@ function advanceWorldTime(memory, minutesSpent) {
 
   let newPeriodIdx = getTimePeriodIndex(currentTime) + periodAdvances;
   let newDay = currentDay;
+  let newMonth = currentMonth;
+  let newYear = currentYear;
+
   while (newPeriodIdx >= TIME_PERIODS.length) {
     newPeriodIdx -= TIME_PERIODS.length;
     newDay++;
   }
+
+  // Roll over days into months/years (30 days per month)
+  while (newDay > 30) {
+    newDay -= 30;
+    newMonth++;
+    if (newMonth > 12) {
+      newMonth = 1;
+      newYear++;
+    }
+  }
+
   const newTime = TIME_PERIODS[newPeriodIdx];
+  const newSeason = calendar ? getSeasonForMonth(calendar, newMonth) : parseCurrentSeason(memory);
 
   const worldTimeMatch = memory.match(/## 🕐 WORLD_TIME[\s\S]*?(?=\n##|$)/);
-  if (!worldTimeMatch) return { memory, newTime, newDay };
+  if (!worldTimeMatch) return { memory, newTime, newDay, newMonth, newYear };
 
   let newSection = worldTimeMatch[0]
     .replace(/\n?\*\*Time Spent:\*\*\s*[^\n]+/gi, '')       // remove ephemeral field
-    .replace(/\*\*Day Count:\*\*\s*\d+/i, `**Day Count:** ${newDay}`)
     .replace(/\*\*Time of Day:\*\*\s*[^\n]+/i, `**Time of Day:** ${newTime}`)
-    .replace(/\*\*Last Updated:\*\*\s*[^\n]+/i, `**Last Updated:** Day ${newDay}, ${newTime}`);
+    .replace(/\*\*Season:\*\*\s*[^\n]+/i, `**Season:** ${newSeason}`)
+    .replace(/\*\*Last Updated:\*\*\s*[^\n]+/i, `**Last Updated:** Day ${newDay}, Month ${newMonth}, ${newTime}`);
+
+  // Update new-format Day/Month/Year fields
+  if (newSection.match(/\*\*Day:\*\*/i)) {
+    newSection = newSection
+      .replace(/\*\*Day:\*\*\s*\d+/i, `**Day:** ${newDay}`)
+      .replace(/\*\*Month:\*\*\s*\d+/i, `**Month:** ${newMonth}`)
+      .replace(/\*\*Year:\*\*\s*\d+/i, `**Year:** ${newYear}`);
+  }
+
+  // Legacy: update Day Count (old saves) — keep in sync until migration runs
+  if (newSection.match(/\*\*Day Count:\*\*/i)) {
+    const absDay = (newYear - 1) * 360 + (newMonth - 1) * 30 + newDay;
+    newSection = newSection.replace(/\*\*Day Count:\*\*\s*\d+/i, `**Day Count:** ${absDay}`);
+  }
+
+  // Legacy: update Fantasy Date day number (old saves)
+  if (newSection.match(/\*\*Fantasy Date:\*\*/i)) {
+    const dayDiff = newDay - currentDay;
+    if (dayDiff !== 0) {
+      newSection = newSection.replace(
+        /(\*\*Fantasy Date:\*\*\s*)(\d+)/i,
+        (_, prefix, dayNum) => `${prefix}${Math.max(1, parseInt(dayNum) + dayDiff)}`
+      );
+    }
+  }
 
   if (newSection.match(/\*\*Minutes Elapsed:\*\*/i)) {
     newSection = newSection.replace(/\*\*Minutes Elapsed:\*\*\s*\d+/i, `**Minutes Elapsed:** ${newMinutesElapsed}`);
   } else {
-    // Insert after Time of Day if field doesn't exist yet (backwards compat)
     newSection = newSection.replace(
       /(\*\*Time of Day:\*\*\s*[^\n]+)/i,
       `$1\n**Minutes Elapsed:** ${newMinutesElapsed}`
     );
   }
 
-  // Auto-increment Fantasy Date day number when calendar day(s) roll over
-  const dayDiff = newDay - currentDay;
-  if (dayDiff > 0) {
-    newSection = newSection.replace(
-      /(\*\*Fantasy Date:\*\*\s*)(\d+)/i,
-      (_, prefix, dayNum) => `${prefix}${parseInt(dayNum) + dayDiff}`
-    );
-  }
-
   return {
     memory: memory.replace(/## 🕐 WORLD_TIME[\s\S]*?(?=\n##|$)/, newSection),
     newTime,
-    newDay
+    newDay,
+    newMonth,
+    newYear
   };
+}
+
+// Parse current season from memory (fallback when no calendar)
+function parseCurrentSeason(memory) {
+  const match = memory.match(/\*\*Season:\*\*\s*([^\n]+)/i);
+  return match ? match[1].trim() : 'Spring';
 }
 
 // Programmatically update the EXHAUSTION section in memory
@@ -562,17 +619,221 @@ function getExhaustionDebuffs(hoursAwake, bedBonus = 0) {
   }
 }
 
-// Fantasy date generator
-function generateFantasyDate() {
-  const months = ['Primember', 'Solstice', 'Harvestmoon', 'Frostfall', 'Starlight', 'Dawnrise',
-                  'Goldleaf', 'Shadowmere', 'Thornfall', 'Ironveil', 'Cinder', 'Wynter'];
-  const eras = ['of the Age of Wonder', 'of the Third Era', 'of the Age of Heroes',
-                'of the New Dawn', 'of the Age of Shadows', 'of the Crimson Age'];
-  const randomMonth = months[Math.floor(Math.random() * months.length)];
-  const randomDay = Math.floor(Math.random() * 28) + 1;
-  const randomYear = Math.floor(Math.random() * 900) + 100;
-  const randomEra = eras[Math.floor(Math.random() * eras.length)];
-  return `${randomDay} ${randomMonth}, ${randomYear} ${randomEra}`;
+// ============================================
+// CALENDAR SYSTEM
+// ============================================
+
+// Standard season mapping (months 1-3 = Winter, 4-6 = Spring, 7-9 = Summer, 10-12 = Autumn)
+const STANDARD_SEASONS = [
+  { name: 'Winter', start: 1, end: 3 },
+  { name: 'Spring', start: 4, end: 6 },
+  { name: 'Summer', start: 7, end: 9 },
+  { name: 'Autumn', start: 10, end: 12 }
+];
+
+// Generate a fantasy calendar using LLM (month names + era only; seasons are standard)
+async function generateCalendar() {
+  const prompt = `Generate a fantasy RPG calendar. Return ONLY the following format, nothing else:
+
+ERA: [a short era name, e.g. "of the Third Age" or "of the Crimson Dawn"]
+M1: [month name]
+M2: [month name]
+M3: [month name]
+M4: [month name]
+M5: [month name]
+M6: [month name]
+M7: [month name]
+M8: [month name]
+M9: [month name]
+M10: [month name]
+M11: [month name]
+M12: [month name]
+
+Make the month names evocative, original, and fitting for a dark fantasy world. No explanations, no extra text.`;
+
+  const response = await callGLM(
+    [{ role: 'user', content: 'Generate the calendar.' }],
+    prompt
+  );
+  return parseCalendarResponse(response);
+}
+
+// Parse the LLM's calendar response text into a calendar object
+function parseCalendarResponse(text) {
+  const calendar = { era: 'of the Unknown Age', months: [], seasons: STANDARD_SEASONS };
+
+  const eraMatch = text.match(/^ERA:\s*(.+)$/im);
+  if (eraMatch) calendar.era = eraMatch[1].trim();
+
+  for (let i = 1; i <= 12; i++) {
+    const match = text.match(new RegExp(`^M${i}:\\s*(.+)$`, 'im'));
+    calendar.months.push({ num: i, name: match ? match[1].trim() : `Month ${i}` });
+  }
+
+  return calendar;
+}
+
+// Build the markdown CALENDAR section from a calendar object
+function buildCalendarSection(calendar) {
+  const monthRows = calendar.months.map(m => `| ${m.num} | ${m.name} |`).join('\n');
+  const seasonRows = STANDARD_SEASONS.map(s => `| ${s.name} | ${s.start}-${s.end} |`).join('\n');
+  return `## 📅 CALENDAR
+**Era:** ${calendar.era}
+**Days Per Month:** 30
+
+**Months:**
+| # | Name |
+|---|------|
+${monthRows}
+
+**Seasons (standard):**
+| Season | Months |
+|--------|--------|
+${seasonRows}`;
+}
+
+// Parse calendar from memory.md
+function parseCalendar(memory) {
+  const match = memory.match(/## 📅 CALENDAR[\s\S]*?(?=\n##|$)/);
+  if (!match) return null;
+  const section = match[0];
+
+  const eraMatch = section.match(/\*\*Era:\*\*\s*(.+)/i);
+  const era = eraMatch ? eraMatch[1].trim() : 'of the Unknown Age';
+
+  const months = [];
+  const monthTable = section.match(/\| \d+ \| [^|\n]+ \|/g);
+  if (monthTable) {
+    monthTable.forEach(row => {
+      const parts = row.match(/\| (\d+) \| ([^|]+) \|/);
+      if (parts) months.push({ num: parseInt(parts[1]), name: parts[2].trim() });
+    });
+  }
+
+  // Seasons are always standard — never read from memory
+  return months.length > 0 ? { era, months, seasons: STANDARD_SEASONS } : null;
+}
+
+function getMonthName(calendar, monthNum) {
+  if (!calendar) return `Month ${monthNum}`;
+  const month = calendar.months.find(m => m.num === monthNum);
+  return month ? month.name : `Month ${monthNum}`;
+}
+
+function getSeasonForMonth(calendar, monthNum) {
+  const seasons = (calendar && calendar.seasons && calendar.seasons.length > 0)
+    ? calendar.seasons
+    : STANDARD_SEASONS;
+  const season = seasons.find(s => monthNum >= s.start && monthNum <= s.end);
+  return season ? season.name : 'Winter';
+}
+
+function formatDisplayDate(day, month, year, calendar) {
+  const monthName = getMonthName(calendar, month);
+  const era = calendar ? calendar.era : '';
+  return `${day} ${monthName}, Year ${year} ${era}`.trim();
+}
+
+// Migrate an old save (no CALENDAR section) to the new structured date format
+async function migrateToCalendarSystem(memory) {
+  if (memory.includes('## 📅 CALENDAR')) return memory; // already migrated
+
+  console.log('Migrating save to calendar system...');
+
+  let calendar;
+  try {
+    calendar = await generateCalendar();
+  } catch (e) {
+    console.error('Calendar LLM call failed during migration, using fallback:', e.message);
+    calendar = parseCalendarResponse(
+      'ERA: of the Unknown Age\nM1: Frostmere\nM2: Ashveil\nM3: Bloomtide\nM4: Sundrift\n' +
+      'M5: Goldenwane\nM6: Hearthfall\nM7: Emberveil\nM8: Stormwatch\n' +
+      'M9: Ironveil\nM10: Ashfall\nM11: Deepwinter\nM12: Coldmere\n' +
+      ''
+    );
+  }
+
+  // Compute Day/Month/Year from absolute day count
+  const dayCountMatch = memory.match(/\*\*Day Count:\*\*\s*(\d+)/i);
+  const absoluteDay = dayCountMatch ? parseInt(dayCountMatch[1]) : 1;
+  const newMonth = Math.min(12, Math.ceil(absoluteDay / 30)) || 1;
+  const newDay = ((absoluteDay - 1) % 30) + 1;
+
+  // Try to preserve year from old fantasy date string
+  let newYear = 1;
+  const fantasyDateMatch = memory.match(/\*\*Fantasy Date:\*\*\s*[^,]+,\s*(\d+)/i);
+  if (fantasyDateMatch) newYear = parseInt(fantasyDateMatch[1]);
+
+  const season = getSeasonForMonth(calendar, newMonth);
+
+  let updated = memory;
+
+  // Replace Fantasy Date line with Day/Month/Year
+  updated = updated.replace(
+    /\*\*Fantasy Date:\*\*\s*[^\n]+\n/i,
+    `**Day:** ${newDay}\n**Month:** ${newMonth}\n**Year:** ${newYear}\n`
+  );
+  // Remove Day Count line
+  updated = updated.replace(/\*\*Day Count:\*\*\s*\d+\n?/i, '');
+  // Update season
+  updated = updated.replace(/\*\*Season:\*\*\s*[^\n]+/i, `**Season:** ${season}`);
+  // Remove old Time Tracking block if present
+  updated = updated.replace(/\n\*\*Time Tracking:\*\*[\s\S]*?(?=\n##|\n---|\n\*\*[A-Z])/i, '');
+  // Remove FANTASY_DATE_LOCKED header line
+  updated = updated.replace(/# FANTASY_DATE_LOCKED:[^\n]*\n/g, '');
+
+  // Insert CALENDAR section after WORLD_TIME section
+  const worldTimeSection = updated.match(/## 🕐 WORLD_TIME[\s\S]*?(?=\n##)/);
+  if (worldTimeSection) {
+    const insertAt = updated.indexOf(worldTimeSection[0]) + worldTimeSection[0].length;
+    updated = updated.slice(0, insertAt) + '\n\n' + buildCalendarSection(calendar) + updated.slice(insertAt);
+  } else {
+    updated += '\n\n' + buildCalendarSection(calendar);
+  }
+
+  await writeMemory(updated);
+  console.log(`Migration complete → Day ${newDay}, Month ${newMonth} (${getMonthName(calendar, newMonth)}), Year ${newYear} ${calendar.era}`);
+  return updated;
+}
+
+// ============================================
+// ACTIVITY LOG
+// ============================================
+
+async function readActivityLog() {
+  try {
+    return await fs.readFile(ACTIVITY_LOG_FILE, 'utf-8');
+  } catch (e) {
+    return '# ACTIVITY_LOG\n';
+  }
+}
+
+async function appendActivityLog(entry, day, month, time) {
+  let log = await readActivityLog();
+  const line = `- [Day ${day}, Month ${month}, ${time}] ${entry}`;
+
+  const lines = log.split('\n');
+  const firstEntryIdx = lines.findIndex(l => l.trim().startsWith('-'));
+  let header, entries;
+  if (firstEntryIdx === -1) {
+    header = log.trimEnd();
+    entries = [];
+  } else {
+    header = lines.slice(0, firstEntryIdx).join('\n').trimEnd();
+    entries = lines.slice(firstEntryIdx).filter(l => l.trim());
+  }
+
+  entries.push(line);
+  if (entries.length > MAX_LOG_ENTRIES) {
+    entries = entries.slice(entries.length - MAX_LOG_ENTRIES);
+  }
+
+  await fs.writeFile(ACTIVITY_LOG_FILE, header + '\n\n' + entries.join('\n') + '\n', 'utf-8');
+}
+
+function parseLogEntry(text) {
+  const match = text.match(/\*\*Log Entry:\*\*\s*([^\n]+)/i);
+  return match ? match[1].trim() : null;
 }
 
 // Parse event pool from memory (events since last sleep)
@@ -792,13 +1053,16 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { message } = req.body;
 
-    // Read current memory
+    // Read current memory — migrate to calendar system if needed (old saves)
     let memory = await readMemory();
+    memory = await migrateToCalendarSystem(memory);
 
     // Parse player stats and exhaustion state
     const stats = parsePlayerStats(memory);
     const exhaustionState = parseExhaustionState(memory);
     const currentDay = parseCurrentDay(memory);
+    const currentMonth = parseCurrentMonth(memory);
+    const currentYear = parseCurrentYear(memory);
     const oldTime = parseCurrentTime(memory);
     const oldDay = currentDay;
     const characterVoice = parseCharacterVoice(memory);
@@ -1039,17 +1303,17 @@ CRITICAL RULES FOR TIME TRACKING:
 - In the WORLD_TIME section, write ONE new field — how long this scene took:
   **Time Spent:** [X minutes]
 - Use narrative judgment to estimate: quick chat ~10min, shopping ~20min, combat ~30min, meal/long conversation ~1hr, travel varies
-- Do NOT change Day Count, Time of Day, Minutes Elapsed, Last Updated, or Fantasy Date — the server manages all of these
-- You MAY update Season if the season changes
+- Do NOT change Day, Month, Year, Time of Day, Minutes Elapsed, Last Updated, or Season — the server manages all of these
 - For sleep/rest, write the actual duration (e.g. "2 hours" for a nap, "8 hours" for a full night) — the server advances time accordingly
 - WORLD_TIME format (copy existing fields exactly, only add Time Spent):
   ## 🕐 WORLD_TIME
-  **Fantasy Date:** [copy EXACTLY — do not change, server auto-increments on day rollover]
-  **Day Count:** [copy EXACTLY — do not change]
+  **Day:** [copy EXACTLY — do not change]
+  **Month:** [copy EXACTLY — do not change]
+  **Year:** [copy EXACTLY — do not change]
   **Time of Day:** [copy EXACTLY — do not change]
   **Minutes Elapsed:** [copy EXACTLY — do not change]
-  **Season:** [current season]
-  **Time Spent:** [X minutes]
+  **Season:** [copy EXACTLY — do not change]
+  **Time Spent:** [X minutes or X hours]
   **Last Updated:** [copy EXACTLY — do not change]
 
 SLEEP HANDLING (when SLEEP_DATA comment present):
@@ -1102,9 +1366,19 @@ EXHAUSTION:
 - COPY the ## 😴 EXHAUSTION section EXACTLY as it appears in the input - do not change ANY values
 - The server automatically calculates hours awake from Time Spent — do not touch
 
+CALENDAR:
+- COPY the ## 📅 CALENDAR section EXACTLY as it appears in the input - do not change ANY values
+- This is a static world property set at game start
+
 WORLD_TIME (these specific fields):
-- Day Count, Time of Day, Minutes Elapsed, Last Updated → copy EXACTLY, server overwrites them
+- Day, Month, Year, Time of Day, Minutes Elapsed, Season, Last Updated → copy EXACTLY, server overwrites them
 - Only write **Time Spent:** to communicate scene duration to the server
+
+ACTIVITY LOG:
+- After updating all sections, write ONE standalone field (not inside any section):
+  **Log Entry:** [past-tense, one sentence, max 12 words — what just happened]
+- Examples: "Defeated three wharf rats in the tavern cellar", "Purchased bread from market vendor", "Rested the night at The Rusty Anchor"
+- This field is ephemeral — the server extracts and stores it. Do NOT add it to any memory section.
 
 
 CRITICAL RULES FOR GENERAL_FACTS (RUMORS & LORE):
@@ -1153,11 +1427,11 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
       updatedMemory = updatedMemory.split('\n').slice(1, -1).join('\n');
     }
 
-    // SAFETY: Preserve coin and exhaustion sections from the pre-processed memory
-    // The LLM sometimes modifies these despite instructions
+    // SAFETY: Preserve server-managed sections from pre-processed memory
     const preserveExhaustion = memory.match(/## 😴 EXHAUSTION[\s\S]*?(?=\n##|$)/);
     const preserveCoinPurse = memory.match(/## 💰 COIN_PURSE[\s\S]*?(?=\n##|$)/);
     const preserveCoinLedger = memory.match(/## 💰 COIN_LEDGER[\s\S]*?(?=\n##|$)/);
+    const preserveCalendar = memory.match(/## 📅 CALENDAR[\s\S]*?(?=\n##|$)/);
 
     if (preserveCoinPurse) {
       if (updatedMemory.includes('## 💰 COIN_PURSE')) {
@@ -1183,14 +1457,21 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
         updatedMemory += '\n\n' + preserveCoinLedger[0];
       }
     }
+    if (preserveCalendar) {
+      if (updatedMemory.includes('## 📅 CALENDAR')) {
+        updatedMemory = updatedMemory.replace(/## 📅 CALENDAR[\s\S]*?(?=\n##|$)/, preserveCalendar[0]);
+      } else {
+        updatedMemory += '\n\n' + preserveCalendar[0];
+      }
+    }
 
     // SERVER-SIDE TIME TRACKING: parse Time Spent from World LLM and advance WORLD_TIME
     // If field is missing during sleep, default to 6h so the clock doesn't stall —
     // but if the LLM explicitly wrote a value (e.g. "2 hours" for a nap), respect it exactly.
     const minutesSpent = parseTimeSpent(updatedMemory, sleepOccurred ? 360 : 20);
-    const { memory: timeMemory, newTime, newDay } = advanceWorldTime(updatedMemory, minutesSpent);
+    const { memory: timeMemory, newTime, newDay, newMonth, newYear } = advanceWorldTime(updatedMemory, minutesSpent);
     updatedMemory = timeMemory;
-    console.log(`Time tracking: +${minutesSpent}min → ${newTime} (Day ${newDay}), sleep: ${sleepOccurred}`);
+    console.log(`Time tracking: +${minutesSpent}min → ${newTime} (Day ${newDay}, Month ${newMonth}, Year ${newYear}), sleep: ${sleepOccurred}`);
 
     // SAFETY: Restore EXHAUSTION section (server will recompute it, LLM must not alter it)
     if (preserveExhaustion) {
@@ -1206,6 +1487,18 @@ Return ONLY the updated memory.md content. No explanations, no markdown code blo
     if (hoursElapsed > 0 || sleepOccurred) {
       updatedMemory = applyTimeProgressionToMemory(updatedMemory, hoursElapsed, sleepOccurred, bedQuality, newDay, newTime);
     }
+
+    // ACTIVITY LOG: extract Log Entry from World LLM response, append to activity_log.md
+    const logEntry = parseLogEntry(worldResponse);
+    if (logEntry) {
+      try {
+        await appendActivityLog(logEntry, newDay, newMonth, newTime);
+      } catch (e) {
+        console.error('Failed to write activity log:', e.message);
+      }
+    }
+    // Strip Log Entry field from memory (it's ephemeral, not stored in memory.md)
+    updatedMemory = updatedMemory.replace(/\n?\*\*Log Entry:\*\*\s*[^\n]+/gi, '');
 
     // Write updated memory
     await writeMemory(updatedMemory);
@@ -1302,7 +1595,12 @@ app.post('/api/character', async (req, res) => {
       return res.status(400).json({ error: 'Each stat must be between 1 and 3' });
     }
 
-    const memory = await readMemory();
+    let memory = await readMemory();
+
+    // Generate calendar if memory doesn't have one yet (new game or post-migration edge case)
+    if (!memory.includes('## 📅 CALENDAR')) {
+      memory = await migrateToCalendarSystem(memory);
+    }
 
     // Create PLAYER_STATS section
     const statsSection = `## 🎭 PLAYER_STATS
@@ -1363,14 +1661,26 @@ app.get('/api/memory', async (req, res) => {
   }
 });
 
-// API: Export save (memory + conversation history)
+// API: Activity log
+app.get('/api/activity-log', async (req, res) => {
+  try {
+    const log = await readActivityLog();
+    res.json({ log });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to read activity log' });
+  }
+});
+
+// API: Export save (memory + conversation history + activity log)
 app.get('/api/export', async (req, res) => {
   try {
     const memory = await readMemory();
+    const activityLog = await readActivityLog();
     const saveData = {
       exportedAt: new Date().toISOString(),
-      version: '1.0',
+      version: '2.0',
       memory: memory,
+      activityLog: activityLog,
       conversationHistory: conversationHistory
     };
 
@@ -1386,13 +1696,17 @@ app.get('/api/export', async (req, res) => {
 // API: Import save
 app.post('/api/import', async (req, res) => {
   try {
-    const { memory, conversationHistory: importedHistory } = req.body;
+    const { memory, conversationHistory: importedHistory, activityLog: importedLog } = req.body;
 
     if (!memory) {
       return res.status(400).json({ error: 'Invalid save file: missing memory' });
     }
 
     await writeMemory(memory);
+
+    if (importedLog) {
+      await fs.writeFile(ACTIVITY_LOG_FILE, importedLog, 'utf-8');
+    }
 
     if (importedHistory && Array.isArray(importedHistory)) {
       conversationHistory = importedHistory;
@@ -1406,63 +1720,79 @@ app.post('/api/import', async (req, res) => {
   }
 });
 
-// API: Reset adventure (clear all memory and conversation history)
+// API: Reset adventure (clear all memory, history, and activity log)
 app.post('/api/reset', async (req, res) => {
   try {
-    const fantasyDate = generateFantasyDate();
+    // Generate a fresh fantasy calendar for this new adventure
+    let calendar;
+    try {
+      calendar = await generateCalendar();
+    } catch (e) {
+      console.error('Calendar generation failed on reset, using fallback:', e.message);
+      calendar = parseCalendarResponse(
+        'ERA: of the Unknown Age\nM1: Frostmere\nM2: Ashveil\nM3: Bloomtide\nM4: Sundrift\n' +
+        'M5: Goldenwane\nM6: Hearthfall\nM7: Emberveil\nM8: Stormwatch\n' +
+        'M9: Ironveil\nM10: Ashfall\nM11: Deepwinter\nM12: Coldmere\n' +
+        ''
+      );
+    }
 
-    // Reset memory.md to initial state with fantasy date and new sections
-    const initialMemory = `# WORLD_MEMORY_VERSION: 2
+    // Random starting date: day 1-28, random month, year 100-999
+    const startDay = Math.floor(Math.random() * 28) + 1;
+    const startMonth = Math.floor(Math.random() * 12) + 1;
+    const startYear = Math.floor(Math.random() * 900) + 100;
+    const initialSeason = getSeasonForMonth(calendar, startMonth);
+    const startMonthName = getMonthName(calendar, startMonth);
+
+    const initialMemory = `# WORLD_MEMORY_VERSION: 3
 # FORMAT: structured_markdown
-# LAST_MIGRATION: none
 # CREATED: ${new Date().toISOString().split('T')[0]}
-# WORLD_STATE: INITIALIZING
-# FANTASY_DATE_LOCKED: ${fantasyDate}
 
 ---
 
-# 🕐 WORLD_TIME
-**Fantasy Date:** ${fantasyDate}
-**Day Count:** 1
+## 🕐 WORLD_TIME
+**Day:** ${startDay}
+**Month:** ${startMonth}
+**Year:** ${startYear}
 **Time of Day:** Morning
-**Season:** Spring
-**Last Updated:** Real: ${new Date().toISOString().split('T')[0]}
+**Minutes Elapsed:** 0
+**Season:** ${initialSeason}
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
-**Time Tracking:**
-- Days elapsed: 1
-- Time progression: Morning of day 1
-- Notes: World time begins now.
+---
+
+${buildCalendarSection(calendar)}
 
 ---
 
 ## 🧍 PLAYER_STATE
 **Condition:** Healthy
-**Last Updated:** Day 1, Morning
+**Last Updated:** Day 1, Month 1, Morning
 
 **Status Log:**
-- [Day 1 - Morning] Starting condition: Well-rested and ready for adventure
+- [Day 1, Month 1 - Morning] Starting condition: Well-rested and ready for adventure
 
 ---
 
 ## 😴 EXHAUSTION
 **Hours Awake:** 0
-**Last Slept Day:** 1
+**Last Slept Day:** ${startDay}
 **Last Slept Time:** Morning
 **Exhaustion Level:** Rested
 **Bed Bonus Hours:** 0
-**Last Updated:** Day 1, Morning
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
 ---
 
 ## 📝 EVENT_POOL
 **Events:**
-- [Day 1 - Morning] Adventure begins at the crossroads
-**Last Updated:** Day 1, Morning
+- [Day ${startDay}, Month ${startMonth} - Morning] Adventure begins
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
 ---
 
 ## 📖 DIARY
-**Last Updated:** Day 1, Morning
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
 *No entries yet. Your story is just beginning...*
 
@@ -1483,7 +1813,7 @@ app.post('/api/reset', async (req, res) => {
 **Gold (gp):** 1
 **Silver (sp):** 5
 **Copper (cp):** 0
-**Last Updated:** Day 1, Morning
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
 **Conversion:** 10 cp = 1 sp, 10 sp = 1 gp, 10 gp = 1 pp
 
@@ -1498,14 +1828,14 @@ app.post('/api/reset', async (req, res) => {
 
 | ID | Date | Description | Debit | Credit |
 |----|------|-------------|-------|--------|
-| 1 | Day 1 - Morning | Starting funds | - | 1gp 5sp |
+| 1 | Day ${startDay}, Month ${startMonth} - Morning | Starting funds | - | 1gp 5sp |
 
 *Note: Balance is authoritative. UI reads from Balance fields above.*
 
 ---
 
 ## ⚔️ INVENTORY
-**Last Updated:** Day 1, Morning
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
 **Items:**
 - [v1] Traveler's Clothes (starting gear)
@@ -1514,7 +1844,7 @@ app.post('/api/reset', async (req, res) => {
 ---
 
 ## 📍 LOCATIONS_VISITED
-**Last Updated:** Day 1, Morning
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
 **Locations:**
 - [v1] Starting Point - You stand at a crossroads. Paths lead north, south, east, and west. The morning sun casts long shadows across the dirt road.
@@ -1522,7 +1852,7 @@ app.post('/api/reset', async (req, res) => {
 ---
 
 ## 👥 PEOPLE_MET
-**Last Updated:** Day 1, Morning
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
 **People:**
 - None yet. Your adventure begins...
@@ -1530,13 +1860,18 @@ app.post('/api/reset', async (req, res) => {
 ---
 
 ## 📜 GENERAL_FACTS
-**Last Updated:** Day 1, Morning
+**Last Updated:** Day ${startDay}, Month ${startMonth}, Morning
 
 **Facts & Rumors Learned:**
 - None yet. As you explore, you'll learn about the world - its history, its secrets, and its stories.
 `;
 
     await writeMemory(initialMemory);
+
+    // Clear activity log
+    try {
+      await fs.writeFile(ACTIVITY_LOG_FILE, '# ACTIVITY_LOG\n', 'utf-8');
+    } catch (e) { /* ignore if file doesn't exist */ }
 
     // Clear conversation history and persist
     conversationHistory = [];

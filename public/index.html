@@ -650,6 +650,60 @@
       50% { box-shadow: 0 0 35px rgba(212, 165, 116, 0.7); }
     }
 
+    #activityLogBtn {
+      position: fixed;
+      top: 20px;
+      right: 160px;
+      background: linear-gradient(135deg, #1a3a2a, #0f2a1a);
+      color: #7dbf9e;
+      font-size: 1.5em;
+      padding: 15px 20px;
+      border: 2px solid #7dbf9e;
+      box-shadow: 0 0 20px rgba(125, 191, 158, 0.3);
+    }
+
+    #activityLogBtn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 0 30px rgba(125, 191, 158, 0.5);
+    }
+
+    /* Activity Log timeline styles */
+    .log-day-group {
+      margin-bottom: 16px;
+    }
+    .log-day-header {
+      font-size: 0.75em;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #ffd700;
+      border-bottom: 1px solid rgba(255, 215, 0, 0.25);
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+    }
+    .log-entry {
+      display: flex;
+      gap: 10px;
+      padding: 4px 0;
+      font-size: 0.88em;
+      color: #c8d8e8;
+    }
+    .log-time {
+      flex-shrink: 0;
+      width: 80px;
+      color: #8899ac;
+      font-style: italic;
+    }
+    .log-text {
+      flex: 1;
+    }
+    .log-empty {
+      text-align: center;
+      color: #8899ac;
+      font-style: italic;
+      padding: 30px 0;
+    }
+
     /* Diary Modal - Parchment Style */
     .diary-modal .modal-content {
       background: linear-gradient(135deg, #f4e4bc, #e8d4a8);
@@ -994,6 +1048,7 @@
   </style>
 </head>
 <body>
+  <button id="activityLogBtn" title="Activity Log">📜</button>
   <button id="diaryBtn" title="Personal Diary">📓</button>
   <button id="journalBtn" title="Adventure Journal">📖</button>
 
@@ -1222,6 +1277,19 @@
     </div>
   </div>
 
+  <!-- Activity Log Modal -->
+  <div class="modal" id="activityLogModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>📜 Activity Log</h2>
+        <button class="close-btn" id="closeActivityLog">×</button>
+      </div>
+      <div class="modal-body" id="activityLogBody">
+        <p style="text-align: center; color: #8899ac;">Loading...</p>
+      </div>
+    </div>
+  </div>
+
   <!-- Diary Entry Popup (shown when sleeping) -->
   <div class="diary-popup" id="diaryPopup">
     <div class="diary-popup-content">
@@ -1268,6 +1336,10 @@
     const exhaustionFill = document.getElementById('exhaustionFill');
     const exhaustionHours = document.getElementById('exhaustionHours');
     const exhaustionStatus = document.getElementById('exhaustionStatus');
+    const activityLogBtn = document.getElementById('activityLogBtn');
+    const activityLogModal = document.getElementById('activityLogModal');
+    const closeActivityLog = document.getElementById('closeActivityLog');
+    const activityLogBody = document.getElementById('activityLogBody');
 
     let isLoading = false;
 
@@ -1569,14 +1641,40 @@
         const title = lines[0].trim();
 
         // Check if section contains WORLD_TIME — use section content not just title
-        // (handles emoji prefix variations and # vs ## heading levels)
         if (section.includes('WORLD_TIME')) {
-          const dateMatch = section.match(/\*\*Fantasy Date:\*\*\s*([^\n]+)/i);
-          const dayMatch = section.match(/\*\*(?:Day Count|Current Day):\*\*\s*(\d+)/i);
           const timeMatch = section.match(/\*\*Time of Day:\*\*\s*([^\n]+)/i);
-          if (dateMatch) worldTime.fantasyDate = dateMatch[1].trim();
-          if (dayMatch) worldTime.day = parseInt(dayMatch[1]);
           if (timeMatch) worldTime.time = timeMatch[1].trim();
+
+          // New format: Day/Month/Year
+          const newDayMatch = section.match(/\*\*Day:\*\*\s*(\d+)/i);
+          const monthMatch = section.match(/\*\*Month:\*\*\s*(\d+)/i);
+          const yearMatch = section.match(/\*\*Year:\*\*\s*(\d+)/i);
+          if (newDayMatch) {
+            worldTime.day = parseInt(newDayMatch[1]);
+            worldTime.month = monthMatch ? parseInt(monthMatch[1]) : 1;
+            worldTime.year = yearMatch ? parseInt(yearMatch[1]) : 1;
+            worldTime.fantasyDate = null; // will be built below
+          } else {
+            // Legacy format: Fantasy Date string + Day Count
+            const dateMatch = section.match(/\*\*Fantasy Date:\*\*\s*([^\n]+)/i);
+            const legacyDayMatch = section.match(/\*\*(?:Day Count|Current Day):\*\*\s*(\d+)/i);
+            if (dateMatch) worldTime.fantasyDate = dateMatch[1].trim();
+            if (legacyDayMatch) worldTime.day = parseInt(legacyDayMatch[1]);
+          }
+        }
+
+        // Check if section contains CALENDAR — extract month names for display
+        if (section.includes('CALENDAR') && !section.includes('COIN')) {
+          const eraMatch = section.match(/\*\*Era:\*\*\s*(.+)/i);
+          if (eraMatch) worldTime.era = eraMatch[1].trim();
+          const monthRows = section.match(/\| \d+ \| [^|\n]+ \|/g);
+          if (monthRows) {
+            worldTime.monthNames = {};
+            monthRows.forEach(row => {
+              const parts = row.match(/\| (\d+) \| ([^|]+) \|/);
+              if (parts) worldTime.monthNames[parseInt(parts[1])] = parts[2].trim();
+            });
+          }
         }
 
         // Check if section contains PLAYER_STATE
@@ -1722,12 +1820,16 @@
           cpAmount.textContent = coins.cp;
 
           // Update time display
-          if (worldTime.fantasyDate) {
+          if (worldTime.month && worldTime.monthNames) {
+            const mName = worldTime.monthNames[worldTime.month] || `Month ${worldTime.month}`;
+            const era = worldTime.era || '';
+            fantasyDate.textContent = `${worldTime.day} ${mName}, Yr ${worldTime.year} ${era}`.trim();
+          } else if (worldTime.month) {
+            fantasyDate.textContent = `Day ${worldTime.day}, Month ${worldTime.month}, Year ${worldTime.year}`;
+          } else if (worldTime.fantasyDate) {
             fantasyDate.textContent = worldTime.fantasyDate;
-          } else if (worldTime.day > 0) {
-            fantasyDate.textContent = 'Day ' + worldTime.day;
           } else {
-            fantasyDate.textContent = 'Day 1';
+            fantasyDate.textContent = 'Day ' + (worldTime.day || 1);
           }
           timeOfDay.textContent = worldTime.time;
 
@@ -1921,6 +2023,74 @@
       }
     }
 
+    // Load and display activity log
+    async function loadActivityLog() {
+      activityLogBody.innerHTML = '<p style="text-align: center; color: #8899ac;">Loading...</p>';
+      try {
+        const response = await fetch('/api/activity-log');
+        const data = await response.json();
+        const log = data.log || '';
+
+        // Parse entries: lines starting with "- ["
+        const entries = log.split('\n')
+          .filter(l => l.trim().startsWith('- ['))
+          .map(l => {
+            // Format: - [Day X, Month Y, TimeOfDay] description
+            const match = l.match(/^-\s*\[([^\]]+)\]\s*(.+)$/);
+            if (!match) return null;
+            const timestamp = match[1].trim();
+            const text = match[2].trim();
+            // Extract day/month/time from timestamp
+            const dayMatch = timestamp.match(/Day\s*(\d+)/i);
+            const monthMatch = timestamp.match(/Month\s*(\d+)/i);
+            const timeMatch = timestamp.match(/,\s*([^,]+)$/);
+            return {
+              day: dayMatch ? parseInt(dayMatch[1]) : 0,
+              month: monthMatch ? parseInt(monthMatch[1]) : 1,
+              time: timeMatch ? timeMatch[1].trim() : '',
+              timestamp,
+              text
+            };
+          })
+          .filter(Boolean)
+          .reverse(); // newest first
+
+        if (entries.length === 0) {
+          activityLogBody.innerHTML = '<div class="log-empty">No activity recorded yet. Start your adventure!</div>';
+          return;
+        }
+
+        // Group by day+month
+        const groups = [];
+        let currentGroup = null;
+        entries.forEach(entry => {
+          const groupKey = `Day ${entry.day}, Month ${entry.month}`;
+          if (!currentGroup || currentGroup.key !== groupKey) {
+            currentGroup = { key: groupKey, entries: [] };
+            groups.push(currentGroup);
+          }
+          currentGroup.entries.push(entry);
+        });
+
+        let html = '';
+        groups.forEach(group => {
+          html += `<div class="log-day-group">
+            <div class="log-day-header">${group.key}</div>`;
+          group.entries.forEach(entry => {
+            html += `<div class="log-entry">
+              <span class="log-time">${entry.time}</span>
+              <span class="log-text">${entry.text}</span>
+            </div>`;
+          });
+          html += '</div>';
+        });
+
+        activityLogBody.innerHTML = html;
+      } catch (error) {
+        activityLogBody.innerHTML = '<p style="text-align: center; color: #ff6b6b;">Failed to load activity log</p>';
+      }
+    }
+
     // Reset adventure
     async function resetAdventure() {
       try {
@@ -1969,6 +2139,22 @@
     journalModal.addEventListener('click', (e) => {
       if (e.target === journalModal) {
         journalModal.classList.remove('active');
+      }
+    });
+
+    // Activity log modal events
+    activityLogBtn.addEventListener('click', () => {
+      activityLogModal.classList.add('active');
+      loadActivityLog();
+    });
+
+    closeActivityLog.addEventListener('click', () => {
+      activityLogModal.classList.remove('active');
+    });
+
+    activityLogModal.addEventListener('click', (e) => {
+      if (e.target === activityLogModal) {
+        activityLogModal.classList.remove('active');
       }
     });
 
